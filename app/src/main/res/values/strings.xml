@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MeshCore</string>
+    <string name="tile_label">MeshCore Status</string>
+    <string name="complication_label">MeshCore</string>
+
+    <!-- Notification channels -->
+    <string name="channel_connection_name">Connection Status</string>
+    <string name="channel_connection_description">Shows the current BLE connection status to the MeshCore companion radio</string>
+    <string name="channel_messages_name">Messages</string>
+    <string name="channel_messages_description">Notifications for incoming MeshCore messages</string>
+
+    <!-- Actions -->
+    <string name="action_disconnect">Disconnect</string>
+    <string name="action_scan">Scan</string>
+    <string name="action_connect">Connect</string>
+    <string name="action_sync">Sync</string>
+    <string name="action_send">Send</string>
+    <string name="action_reply">Reply</string>
+
+    <!-- Status messages -->
+    <string name="status_connected">Connected</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_scanning">Scanning…</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_no_contacts">No contacts yet</string>
+    <string name="status_no_messages">No messages yet</string>
+
+    <!-- Notification content -->
+    <string name="notification_new_message">New message from %1$s</string>
+    <string name="notification_connected">Connected to %1$s</string>
+</resources>

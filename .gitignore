@@ -1,0 +1,45 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Android
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Kotlin
+*.class
+
+# Log Files
+*.log
+
+# Android Studio Navigation editor temp files
+.navigation
+
+# Android Studio captures folder
+captures/
+
+# Keystore files (IMPORTANT: never commit signing keys)
+*.jks
+*.keystore
+keystore.properties
+
+# Google Services
+google-services.json
+
+# Gradle
+.gradle/
+build/
