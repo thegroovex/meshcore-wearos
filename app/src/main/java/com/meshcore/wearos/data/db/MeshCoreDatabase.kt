@@ -49,7 +49,7 @@ class MeshCoreTypeConverters {
 @Database(
     entities = [Contact::class, Message::class, Channel::class],
     version = 1,
-    exportSchema = true
+    exportSchema = false
 )
 @TypeConverters(MeshCoreTypeConverters::class)
 abstract class MeshCoreDatabase : RoomDatabase() {
