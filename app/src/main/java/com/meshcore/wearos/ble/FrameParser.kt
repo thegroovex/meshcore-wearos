@@ -15,7 +15,7 @@ sealed class ParsedFrame {
     data object Ok : ParsedFrame()
     data class Err(val errorCode: Int) : ParsedFrame()
     data class SelfInfo(val deviceInfo: DeviceInfo) : ParsedFrame()
-    data class DeviceInfo(val info: com.meshcore.wearos.data.model.DeviceInfo) : ParsedFrame()
+    data class DeviceInfoFrame(val info: com.meshcore.wearos.data.model.DeviceInfo) : ParsedFrame()
     data object ContactsStart : ParsedFrame()
     data class ContactFrame(val contact: Contact) : ParsedFrame()
     data object EndOfContacts : ParsedFrame()
@@ -119,7 +119,7 @@ object FrameParser {
             name = name,
             nodeType = NodeType.fromAdvType(advType)
         )
-        return ParsedFrame.DeviceInfo(deviceInfo)
+        return ParsedFrame.DeviceInfoFrame(deviceInfo)
     }
 
     private fun parseContact(payload: ByteArray): ParsedFrame {

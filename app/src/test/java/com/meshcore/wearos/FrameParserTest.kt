@@ -117,6 +117,15 @@ class FrameParserTest {
     }
 
     @Test
+    fun `parse RESP_CODE_DEVICE_INFO returns ParsedFrame_DeviceInfoFrame`() {
+        // Build a dummy device info frame (32 bytes pubkey + type + name)
+        val frame = ByteArray(35)
+        frame[0] = MeshCoreProtocol.RESP_CODE_DEVICE_INFO
+        val result = FrameParser.parse(frame)
+        assertTrue(result is ParsedFrame.DeviceInfoFrame)
+    }
+
+    @Test
     fun `parse empty frame returns ParsedFrame_Unknown`() {
         val frame = ByteArray(0)
         val result = FrameParser.parse(frame)

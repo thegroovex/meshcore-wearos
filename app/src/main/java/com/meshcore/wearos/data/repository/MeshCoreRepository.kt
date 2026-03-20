@@ -105,7 +105,7 @@ class MeshCoreRepository @Inject constructor(
         Log.d(TAG, "Received frame: ${parsed::class.simpleName}")
 
         when (parsed) {
-            is ParsedFrame.DeviceInfo -> {
+            is ParsedFrame.DeviceInfoFrame -> {
                 _deviceInfo.value = parsed.info
                 // After device info, send app start
                 bleManager.sendFrame(MeshCoreProtocol.buildAppStartFrame())
