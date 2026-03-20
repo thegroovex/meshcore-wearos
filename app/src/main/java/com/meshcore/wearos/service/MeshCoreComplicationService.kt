@@ -12,20 +12,31 @@ import androidx.wear.watchface.complications.datasource.SuspendingComplicationDa
 import com.meshcore.wearos.ble.BleConnectionState
 import com.meshcore.wearos.data.repository.MeshCoreRepository
 import com.meshcore.wearos.ui.MainActivity
-import dagger.hilt.android.AndroidEntryPoint
-import javax.inject.Inject
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 
 /**
  * MeshCoreComplicationService provides complication data for watch faces.
- *
- * It displays the current connection status and can show unread message counts
- * directly on the watch face, giving users at-a-glance mesh network information.
+ * 
+ * Note: Manual Hilt injection is used because @AndroidEntryPoint does not support
+ * SuspendingComplicationDataSourceService directly.
  */
-@AndroidEntryPoint
 class MeshCoreComplicationService : SuspendingComplicationDataSourceService() {
 
-    @Inject
-    lateinit var repository: MeshCoreRepository
+    @EntryPoint
+    @InstallIn(SingletonComponent::class)
+    interface ServiceEntryPoint {
+        fun repository(): MeshCoreRepository
+    }
+
+    private val repository: MeshCoreRepository by lazy {
+        EntryPointAccessors.fromApplication(
+            applicationContext,
+            ServiceEntryPoint::class.java
+        ).repository()
+    }
 
     override fun getPreviewData(type: ComplicationType): ComplicationData? {
         return when (type) {
