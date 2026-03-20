@@ -63,9 +63,17 @@ dependencies {
     implementation(libs.wear.compose.foundation)
     implementation(libs.wear.compose.navigation)
 
+    // Wear OS Services & Data
+    implementation(libs.wear.watchface.complications.datasource)
+    implementation(libs.wear.watchface.complications.datasource.ktx)
+    implementation(libs.wear.tiles)
+    implementation(libs.wear.tiles.material)
+    implementation(libs.wear)
+
     // Horologist
     implementation(libs.horologist.compose.layout)
     implementation(libs.horologist.compose.material)
+    implementation(libs.horologist.tiles)
 
     // Play Services Wearable
     implementation(libs.play.services.wearable)

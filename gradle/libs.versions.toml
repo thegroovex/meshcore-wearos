@@ -17,6 +17,9 @@ coroutines = "1.10.1"
 datastore = "1.1.2"
 horologist = "0.6.21"
 playServicesWearable = "18.2.0"
+wearWatchface = "1.2.1"
+wearTiles = "1.4.1"
+wear = "1.3.0"
 junit = "4.13.2"
 junitVersion = "1.2.1"
 espressoCore = "3.6.1"
@@ -38,9 +41,17 @@ wear-compose-material = { group = "androidx.wear.compose", name = "compose-mater
 wear-compose-foundation = { group = "androidx.wear.compose", name = "compose-foundation", version.ref = "wearComposeFoundation" }
 wear-compose-navigation = { group = "androidx.wear.compose", name = "compose-navigation", version.ref = "wearComposeNavigation" }
 
+# Wear OS Services
+wear-watchface-complications-datasource = { group = "androidx.wear.watchface", name = "watchface-complications-datasource", version.ref = "wearWatchface" }
+wear-watchface-complications-datasource-ktx = { group = "androidx.wear.watchface", name = "watchface-complications-datasource-ktx", version.ref = "wearWatchface" }
+wear-tiles = { group = "androidx.wear.tiles", name = "tiles", version.ref = "wearTiles" }
+wear-tiles-material = { group = "androidx.wear.tiles", name = "tiles-material", version.ref = "wearTiles" }
+wear = { group = "androidx.wear", name = "wear", version.ref = "wear" }
+
 # Horologist (Google's WearOS utility library)
 horologist-compose-layout = { group = "com.google.android.horologist", name = "horologist-compose-layout", version.ref = "horologist" }
 horologist-compose-material = { group = "com.google.android.horologist", name = "horologist-compose-material", version.ref = "horologist" }
+horologist-tiles = { group = "com.google.android.horologist", name = "horologist-tiles", version.ref = "horologist" }
 
 # Play Services Wearable
 play-services-wearable = { group = "com.google.android.gms", name = "play-services-wearable", version.ref = "playServicesWearable" }

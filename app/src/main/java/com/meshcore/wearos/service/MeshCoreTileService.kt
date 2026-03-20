@@ -5,7 +5,6 @@ import androidx.wear.tiles.ResourceBuilders
 import androidx.wear.tiles.TileBuilders
 import androidx.wear.tiles.LayoutElementBuilders
 import androidx.wear.tiles.TimelineBuilders
-import androidx.wear.tiles.ColorBuilders
 import androidx.wear.tiles.DimensionBuilders
 import com.google.android.horologist.tiles.SuspendingTileService
 import com.meshcore.wearos.ble.BleConnectionState
@@ -31,7 +30,7 @@ class MeshCoreTileService : SuspendingTileService() {
 
     private val repository: MeshCoreRepository by lazy {
         EntryPointAccessors.fromApplication(
-            applicationContext,
+            this.applicationContext,
             ServiceEntryPoint::class.java
         ).repository()
     }

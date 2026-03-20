@@ -33,7 +33,7 @@ class MeshCoreComplicationService : SuspendingComplicationDataSourceService() {
 
     private val repository: MeshCoreRepository by lazy {
         EntryPointAccessors.fromApplication(
-            applicationContext,
+            this.applicationContext,
             ServiceEntryPoint::class.java
         ).repository()
     }
@@ -84,7 +84,7 @@ class MeshCoreComplicationService : SuspendingComplicationDataSourceService() {
 
     private fun buildLaunchPendingIntent(): PendingIntent {
         val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         return PendingIntent.getActivity(
             this, 0, intent,
