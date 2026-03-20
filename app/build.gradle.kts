@@ -65,7 +65,6 @@ dependencies {
 
     // Wear OS Services & Data
     implementation(libs.wear.watchface.complications.datasource)
-    implementation(libs.wear.watchface.complications.datasource.ktx)
     implementation(libs.wear.tiles)
     implementation(libs.wear.tiles.material)
     implementation(libs.wear)

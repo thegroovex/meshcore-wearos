@@ -41,9 +41,8 @@ wear-compose-material = { group = "androidx.wear.compose", name = "compose-mater
 wear-compose-foundation = { group = "androidx.wear.compose", name = "compose-foundation", version.ref = "wearComposeFoundation" }
 wear-compose-navigation = { group = "androidx.wear.compose", name = "compose-navigation", version.ref = "wearComposeNavigation" }
 
-# Wear OS Services
+# Wear OS Services & Data
 wear-watchface-complications-datasource = { group = "androidx.wear.watchface", name = "watchface-complications-datasource", version.ref = "wearWatchface" }
-wear-watchface-complications-datasource-ktx = { group = "androidx.wear.watchface", name = "watchface-complications-datasource-ktx", version.ref = "wearWatchface" }
 wear-tiles = { group = "androidx.wear.tiles", name = "tiles", version.ref = "wearTiles" }
 wear-tiles-material = { group = "androidx.wear.tiles", name = "tiles-material", version.ref = "wearTiles" }
 wear = { group = "androidx.wear", name = "wear", version.ref = "wear" }
