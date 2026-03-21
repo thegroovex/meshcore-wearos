@@ -6,7 +6,9 @@ import androidx.wear.tiles.TileBuilders
 import androidx.wear.tiles.LayoutElementBuilders
 import androidx.wear.tiles.TimelineBuilders
 import androidx.wear.tiles.DimensionBuilders
-import com.google.android.horologist.tiles.SuspendingTileService
+import androidx.wear.tiles.TileService
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import com.meshcore.wearos.ble.BleConnectionState
 import com.meshcore.wearos.data.repository.MeshCoreRepository
 import dagger.hilt.EntryPoint
@@ -16,8 +18,9 @@ import dagger.hilt.components.SingletonComponent
 
 /**
  * MeshCoreTileService provides a quick-access tile for connection status.
+ * Using the standard TileService for maximum compatibility.
  */
-class MeshCoreTileService : SuspendingTileService() {
+class MeshCoreTileService : TileService() {
 
     @EntryPoint
     @InstallIn(SingletonComponent::class)
@@ -26,24 +29,27 @@ class MeshCoreTileService : SuspendingTileService() {
     }
 
     private val repository: MeshCoreRepository by lazy {
-        val appContext = this.applicationContext ?: throw IllegalStateException("Context not available")
         EntryPointAccessors.fromApplication(
-            appContext,
+            applicationContext,
             ServiceEntryPoint::class.java
         ).repository()
     }
 
-    override suspend fun resourcesRequest(
+    override fun onResourcesRequest(
         requestParams: RequestBuilders.ResourcesRequest
-    ): ResourceBuilders.Resources {
-        return ResourceBuilders.Resources.Builder()
-            .setVersion("1")
-            .build()
+    ): ListenableFuture<ResourceBuilders.Resources> {
+        val future = SettableFuture.create<ResourceBuilders.Resources>()
+        future.set(
+            ResourceBuilders.Resources.Builder()
+                .setVersion("1")
+                .build()
+        )
+        return future
     }
 
-    override suspend fun tileRequest(
+    override fun onTileRequest(
         requestParams: RequestBuilders.TileRequest
-    ): TileBuilders.Tile {
+    ): ListenableFuture<TileBuilders.Tile> {
         val connectionState = repository.connectionState.value
         val statusText = when (connectionState) {
             is BleConnectionState.Connected -> "Connected to ${connectionState.deviceName}"
@@ -72,7 +78,7 @@ class MeshCoreTileService : SuspendingTileService() {
             )
             .build()
 
-        return TileBuilders.Tile.Builder()
+        val tile = TileBuilders.Tile.Builder()
             .setResourcesVersion("1")
             .setTimeline(
                 TimelineBuilders.Timeline.Builder()
@@ -88,5 +94,9 @@ class MeshCoreTileService : SuspendingTileService() {
                     .build()
             )
             .build()
+
+        val future = SettableFuture.create<TileBuilders.Tile>()
+        future.set(tile)
+        return future
     }
 }

@@ -1,15 +1,14 @@
 package com.meshcore.wearos.service
 
 import android.app.PendingIntent
-import android.content.Context
 import android.content.Intent
 import androidx.wear.watchface.complications.data.ComplicationData
 import androidx.wear.watchface.complications.data.ComplicationType
 import androidx.wear.watchface.complications.data.LongTextComplicationData
 import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.ShortTextComplicationData
+import androidx.wear.watchface.complications.datasource.ComplicationDataSourceService
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
-import androidx.wear.watchface.complications.datasource.SuspendingComplicationDataSourceService
 import com.meshcore.wearos.ble.BleConnectionState
 import com.meshcore.wearos.data.repository.MeshCoreRepository
 import com.meshcore.wearos.ui.MainActivity
@@ -20,8 +19,9 @@ import dagger.hilt.components.SingletonComponent
 
 /**
  * MeshCoreComplicationService provides complication data for watch faces.
+ * Using the standard ComplicationDataSourceService for maximum compatibility.
  */
-class MeshCoreComplicationService : SuspendingComplicationDataSourceService() {
+class MeshCoreComplicationService : ComplicationDataSourceService() {
 
     @EntryPoint
     @InstallIn(SingletonComponent::class)
@@ -30,9 +30,8 @@ class MeshCoreComplicationService : SuspendingComplicationDataSourceService() {
     }
 
     private val repository: MeshCoreRepository by lazy {
-        val appContext = this.applicationContext ?: throw IllegalStateException("Context not available")
         EntryPointAccessors.fromApplication(
-            appContext,
+            applicationContext,
             ServiceEntryPoint::class.java
         ).repository()
     }
@@ -45,7 +44,10 @@ class MeshCoreComplicationService : SuspendingComplicationDataSourceService() {
         }
     }
 
-    override suspend fun onComplicationRequest(request: ComplicationRequest): ComplicationData? {
+    override fun onComplicationRequest(
+        request: ComplicationRequest,
+        listener: ComplicationRequestListener
+    ) {
         val connectionState = repository.connectionState.value
         val (shortStatus, longStatus) = when (connectionState) {
             is BleConnectionState.Connected -> Pair("Mesh", "MeshCore: ${connectionState.deviceName}")
@@ -55,11 +57,12 @@ class MeshCoreComplicationService : SuspendingComplicationDataSourceService() {
             is BleConnectionState.Error -> Pair("Err", "MeshCore: Error")
         }
 
-        return when (request.complicationType) {
+        val data = when (request.complicationType) {
             ComplicationType.SHORT_TEXT -> buildShortTextComplication("Mesh", shortStatus)
             ComplicationType.LONG_TEXT -> buildLongTextComplication(longStatus)
             else -> null
         }
+        listener.onComplicationData(data)
     }
 
     private fun buildShortTextComplication(title: String, text: String): ShortTextComplicationData {
@@ -82,12 +85,11 @@ class MeshCoreComplicationService : SuspendingComplicationDataSourceService() {
     }
 
     private fun buildLaunchPendingIntent(): PendingIntent {
-        val context: Context = this
-        val intent = Intent(context, MainActivity::class.java).apply {
+        val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         return PendingIntent.getActivity(
-            context, 0, intent,
+            this, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
