@@ -1,6 +1,7 @@
 package com.meshcore.wearos.service
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import androidx.wear.watchface.complications.data.ComplicationData
 import androidx.wear.watchface.complications.data.ComplicationType
@@ -19,9 +20,6 @@ import dagger.hilt.components.SingletonComponent
 
 /**
  * MeshCoreComplicationService provides complication data for watch faces.
- * 
- * Note: Manual Hilt injection is used because @AndroidEntryPoint does not support
- * SuspendingComplicationDataSourceService directly.
  */
 class MeshCoreComplicationService : SuspendingComplicationDataSourceService() {
 
@@ -32,8 +30,9 @@ class MeshCoreComplicationService : SuspendingComplicationDataSourceService() {
     }
 
     private val repository: MeshCoreRepository by lazy {
+        val appContext = this.applicationContext ?: throw IllegalStateException("Context not available")
         EntryPointAccessors.fromApplication(
-            this.applicationContext,
+            appContext,
             ServiceEntryPoint::class.java
         ).repository()
     }
@@ -83,11 +82,12 @@ class MeshCoreComplicationService : SuspendingComplicationDataSourceService() {
     }
 
     private fun buildLaunchPendingIntent(): PendingIntent {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        val context: Context = this
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         return PendingIntent.getActivity(
-            this, 0, intent,
+            context, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }

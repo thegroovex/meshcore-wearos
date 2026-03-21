@@ -16,9 +16,6 @@ import dagger.hilt.components.SingletonComponent
 
 /**
  * MeshCoreTileService provides a quick-access tile for connection status.
- * 
- * Note: Manual Hilt injection is used because @AndroidEntryPoint does not support
- * SuspendingTileService directly.
  */
 class MeshCoreTileService : SuspendingTileService() {
 
@@ -29,8 +26,9 @@ class MeshCoreTileService : SuspendingTileService() {
     }
 
     private val repository: MeshCoreRepository by lazy {
+        val appContext = this.applicationContext ?: throw IllegalStateException("Context not available")
         EntryPointAccessors.fromApplication(
-            this.applicationContext,
+            appContext,
             ServiceEntryPoint::class.java
         ).repository()
     }
