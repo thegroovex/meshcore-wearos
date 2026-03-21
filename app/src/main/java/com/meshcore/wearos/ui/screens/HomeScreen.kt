@@ -23,6 +23,7 @@ import androidx.wear.compose.material.Button
 import androidx.wear.compose.material.ButtonDefaults
 import androidx.wear.compose.material.Chip
 import androidx.wear.compose.material.ChipDefaults
+import androidx.wear.compose.material.CircularProgressIndicator
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import com.meshcore.wearos.ble.BleConnectionState
@@ -48,6 +49,7 @@ fun HomeScreen(
     val deviceInfo by viewModel.deviceInfo.collectAsState()
     val contacts by viewModel.contacts.collectAsState()
     val batteryMillivolts by viewModel.batteryMillivolts.collectAsState()
+    val isSyncingContacts by viewModel.isSyncingContacts.collectAsState()
 
     // Navigate away if disconnected
     LaunchedEffect(connectionState) {
@@ -207,9 +209,18 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
-                colors = ButtonDefaults.buttonColors(backgroundColor = MeshGreen)
+                colors = ButtonDefaults.buttonColors(backgroundColor = MeshGreen),
+                enabled = !isSyncingContacts
             ) {
-                Text("Sync", color = Color.Black)
+                if (isSyncingContacts) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Color.Black,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Sync", color = Color.Black)
+                }
             }
         }
     }

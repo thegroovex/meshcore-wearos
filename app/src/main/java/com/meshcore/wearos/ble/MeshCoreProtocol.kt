@@ -37,7 +37,7 @@ object MeshCoreProtocol {
     const val CMD_SEND_CHANNEL_TXT_MSG: Byte = 3
 
     /** Sync contacts list. Responds with RESP_CODE_CONTACTS_START, RESP_CODE_CONTACT..., RESP_CODE_END_OF_CONTACTS */
-    const val CMD_GET_CONTACTS: Byte = 4
+    const val CMD_GET_CONTACTS: Byte = 4 // v3 standard
 
     /** Get device clock. Responds with RESP_CODE_CURR_TIME(9) + 32-bit epoch secs */
     const val CMD_GET_DEVICE_TIME: Byte = 5
@@ -91,7 +91,7 @@ object MeshCoreProtocol {
     const val CMD_SET_TUNING_PARAMS: Byte = 21
 
     /** Send device query. Responds with RESP_CODE_DEVICE_INFO(13) */
-    const val CMD_DEVICE_QEURY: Byte = 22
+    const val CMD_DEVICE_QUERY_V2: Byte = 22
 
     /** Send raw data packet. Responds with RESP_CODE_OK(0) or RESP_CODE_ERR(1) */
     const val CMD_SEND_RAW_DATA: Byte = 25
