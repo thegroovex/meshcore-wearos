@@ -60,31 +60,20 @@ data class BleDevice(
 
 /**
  * BleManager handles all Bluetooth Low Energy operations for the MeshCore WearOS client.
- *
- * It manages device scanning, GATT connection lifecycle, characteristic read/write operations,
- * and notification subscriptions for the Nordic UART Service (NUS) used by MeshCore devices.
  */
 @Singleton
 class BleManager @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     private val TAG = "MeshCore-BLE"
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     private val bluetoothManager = context.getSystemService(BluetoothManager::class.java)
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
 
     private var bluetoothGatt: BluetoothGatt? = null
     private var rxCharacteristic: BluetoothGattCharacteristic? = null
     private var txCharacteristic: BluetoothGattCharacteristic? = null
-
-    // Write queue to prevent concurrent BLE writes
-    private val writeQueue = Channel<ByteArray>(capacity = Channel.UNLIMITED)
-
-    // -------------------------------------------------------------------------
-    // Public state flows
-    // -------------------------------------------------------------------------
+    private var isScanning = false
 
     private val _connectionState = MutableStateFlow<BleConnectionState>(BleConnectionState.Disconnected)
     val connectionState: StateFlow<BleConnectionState> = _connectionState.asStateFlow()
@@ -95,15 +84,16 @@ class BleManager @Inject constructor(
     private val _incomingFrames = MutableSharedFlow<ByteArray>(extraBufferCapacity = 64)
     val incomingFrames: SharedFlow<ByteArray> = _incomingFrames.asSharedFlow()
 
-    // -------------------------------------------------------------------------
-    // BLE Scan
-    // -------------------------------------------------------------------------
-
     @SuppressLint("MissingPermission")
     fun startScan() {
         val scanner = bluetoothAdapter?.bluetoothLeScanner ?: run {
             _connectionState.value = BleConnectionState.Error("Bluetooth not available")
             return
+        }
+
+        if (isScanning) {
+            Log.d(TAG, "Scan already in progress, stopping first")
+            stopScan()
         }
 
         _scannedDevices.value = emptyList()
@@ -117,20 +107,34 @@ class BleManager @Inject constructor(
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
-        scanner.startScan(listOf(scanFilter), scanSettings, scanCallback)
-
-        // Auto-stop scan after 30 seconds
-        scope.launch {
-            delay(30_000)
-            stopScan()
+        try {
+            isScanning = true
+            scanner.startScan(listOf(scanFilter), scanSettings, scanCallback)
+            
+            // Auto-stop scan after 30 seconds
+            scope.launch {
+                delay(30_000)
+                if (isScanning) stopScan()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start scan: ${e.message}")
+            isScanning = false
+            _connectionState.value = BleConnectionState.Error("Scan start failed: ${e.message}")
         }
     }
 
     @SuppressLint("MissingPermission")
     fun stopScan() {
-        bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
-        if (_connectionState.value is BleConnectionState.Scanning) {
-            _connectionState.value = BleConnectionState.Disconnected
+        if (!isScanning) return
+        try {
+            bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping scan: ${e.message}")
+        } finally {
+            isScanning = false
+            if (_connectionState.value is BleConnectionState.Scanning) {
+                _connectionState.value = BleConnectionState.Disconnected
+            }
         }
     }
 
@@ -138,7 +142,7 @@ class BleManager @Inject constructor(
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
-            val name = device.name ?: return
+            val name = device.name ?: "Unknown"
             val address = device.address
 
             val bleDevice = BleDevice(
@@ -160,13 +164,10 @@ class BleManager @Inject constructor(
 
         override fun onScanFailed(errorCode: Int) {
             Log.e(TAG, "BLE scan failed with error code: $errorCode")
+            isScanning = false
             _connectionState.value = BleConnectionState.Error("Scan failed (code $errorCode)")
         }
     }
-
-    // -------------------------------------------------------------------------
-    // GATT Connection
-    // -------------------------------------------------------------------------
 
     @SuppressLint("MissingPermission")
     fun connect(device: BleDevice) {
@@ -175,7 +176,7 @@ class BleManager @Inject constructor(
 
         bluetoothGatt = device.device.connectGatt(
             context,
-            false, // autoConnect = false for faster initial connection
+            false,
             gattCallback,
             BluetoothDevice.TRANSPORT_LE
         )
@@ -206,13 +207,8 @@ class BleManager @Inject constructor(
         txCharacteristic = null
     }
 
-    // -------------------------------------------------------------------------
-    // GATT Callback
-    // -------------------------------------------------------------------------
-
     @SuppressLint("MissingPermission")
     private val gattCallback = object : BluetoothGattCallback() {
-
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
@@ -229,15 +225,13 @@ class BleManager @Inject constructor(
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                Log.e(TAG, "Service discovery failed with status: $status")
                 _connectionState.value = BleConnectionState.Error("Service discovery failed")
                 return
             }
 
             val nusService = gatt.getService(UUID.fromString(NUS_SERVICE_UUID))
             if (nusService == null) {
-                Log.e(TAG, "NUS service not found on device")
-                _connectionState.value = BleConnectionState.Error("MeshCore NUS service not found")
+                _connectionState.value = BleConnectionState.Error("NUS service not found")
                 disconnect()
                 return
             }
@@ -246,131 +240,54 @@ class BleManager @Inject constructor(
             txCharacteristic = nusService.getCharacteristic(UUID.fromString(NUS_TX_CHAR_UUID))
 
             if (rxCharacteristic == null || txCharacteristic == null) {
-                Log.e(TAG, "NUS characteristics not found")
                 _connectionState.value = BleConnectionState.Error("NUS characteristics not found")
                 disconnect()
                 return
             }
 
-            // Enable notifications on TX characteristic (radio -> app)
-            enableNotifications(gatt, txCharacteristic!!)
-        }
-
-        override fun onCharacteristicChanged(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            value: ByteArray
-        ) {
-            if (characteristic.uuid == UUID.fromString(NUS_TX_CHAR_UUID)) {
-                scope.launch {
-                    _incomingFrames.emit(value)
-                }
+            gatt.setCharacteristicNotification(txCharacteristic!!, true)
+            val descriptor = txCharacteristic!!.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
+            if (descriptor != null) {
+                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                gatt.writeDescriptor(descriptor)
             }
         }
 
-        @Deprecated("Deprecated in API 33, but needed for API < 33")
-        override fun onCharacteristicChanged(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic
-        ) {
+        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+            if (characteristic.uuid == UUID.fromString(NUS_TX_CHAR_UUID)) {
+                scope.launch { _incomingFrames.emit(value) }
+            }
+        }
+
+        @Deprecated("Deprecated in API 33")
+        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
                 if (characteristic.uuid == UUID.fromString(NUS_TX_CHAR_UUID)) {
-                    scope.launch {
-                        _incomingFrames.emit(characteristic.value)
-                    }
+                    scope.launch { _incomingFrames.emit(characteristic.value) }
                 }
             }
         }
 
-        override fun onDescriptorWrite(
-            gatt: BluetoothGatt,
-            descriptor: BluetoothGattDescriptor,
-            status: Int
-        ) {
+        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                Log.i(TAG, "Notifications enabled, connection ready")
                 val deviceName = gatt.device.name ?: gatt.device.address
-                _connectionState.value = BleConnectionState.Connected(
-                    deviceName = deviceName,
-                    deviceAddress = gatt.device.address
-                )
-                // Start write queue processor
-                scope.launch { processWriteQueue() }
-            }
-        }
-
-        override fun onCharacteristicWrite(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            status: Int
-        ) {
-            if (status != BluetoothGatt.GATT_SUCCESS) {
-                Log.e(TAG, "Characteristic write failed with status: $status")
+                _connectionState.value = BleConnectionState.Connected(deviceName, gatt.device.address)
             }
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Notification setup
-    // -------------------------------------------------------------------------
-
     @SuppressLint("MissingPermission")
-    private fun enableNotifications(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-        gatt.setCharacteristicNotification(characteristic, true)
-
-        val cccdUuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-        val descriptor = characteristic.getDescriptor(cccdUuid) ?: return
-
+    fun sendData(data: ByteArray): Boolean {
+        val gatt = bluetoothGatt ?: return false
+        val char = rxCharacteristic ?: return false
+        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+            gatt.writeCharacteristic(char, data, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
         } else {
-            @Suppress("DEPRECATION")
-            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-            @Suppress("DEPRECATION")
-            gatt.writeDescriptor(descriptor)
+            char.value = data
+            char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            gatt.writeCharacteristic(char)
         }
+        return true
     }
-
-    // -------------------------------------------------------------------------
-    // Write operations
-    // -------------------------------------------------------------------------
-
-    /**
-     * Sends a command frame to the connected MeshCore device.
-     * Frames are queued and sent sequentially to prevent BLE write conflicts.
-     */
-    fun sendFrame(frame: ByteArray) {
-        scope.launch {
-            writeQueue.send(frame)
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun processWriteQueue() {
-        for (frame in writeQueue) {
-            val gatt = bluetoothGatt ?: break
-            val rx = rxCharacteristic ?: break
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                gatt.writeCharacteristic(
-                    rx,
-                    frame,
-                    BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                rx.value = frame
-                @Suppress("DEPRECATION")
-                rx.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                @Suppress("DEPRECATION")
-                gatt.writeCharacteristic(rx)
-            }
-
-            // Small delay between writes to avoid BLE congestion
-            delay(50)
-        }
-    }
-
-    val isBluetoothEnabled: Boolean
-        get() = bluetoothAdapter?.isEnabled == true
 }

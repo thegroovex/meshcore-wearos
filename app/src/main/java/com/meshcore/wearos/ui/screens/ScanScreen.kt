@@ -1,5 +1,9 @@
 package com.meshcore.wearos.ui.screens
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,7 +19,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
@@ -25,18 +28,15 @@ import androidx.wear.compose.material.ButtonDefaults
 import androidx.wear.compose.material.Chip
 import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.CircularProgressIndicator
-import androidx.wear.compose.material.Icon
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
-import com.meshcore.wearos.R
 import com.meshcore.wearos.ble.BleConnectionState
 import com.meshcore.wearos.ble.BleDevice
 import com.meshcore.wearos.ui.MainViewModel
 import com.meshcore.wearos.ui.theme.MeshGreen
 
 /**
- * ScanScreen displays a list of nearby MeshCore BLE devices and allows the user
- * to initiate a connection. It automatically starts scanning when first displayed.
+ * ScanScreen displays a list of nearby MeshCore BLE devices and handles runtime permissions.
  */
 @Composable
 fun ScanScreen(
@@ -46,9 +46,32 @@ fun ScanScreen(
     val connectionState by viewModel.connectionState.collectAsState()
     val scannedDevices by viewModel.scannedDevices.collectAsState()
 
-    // Auto-start scan when screen is shown
+    // Permissions list based on Android version
+    val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        listOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        )
+    } else {
+        listOf(
+            Manifest.permission.BLUETOOTH,
+            Manifest.permission.BLUETOOTH_ADMIN,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        if (results.all { it.value }) {
+            viewModel.startScan()
+        }
+    }
+
+    // Request permissions and start scan when screen is shown
     LaunchedEffect(Unit) {
-        viewModel.startScan()
+        permissionLauncher.launch(permissions.toTypedArray())
     }
 
     // Navigate away when connected
@@ -72,7 +95,7 @@ fun ScanScreen(
             is BleConnectionState.Error -> {
                 ErrorContent(
                     message = (connectionState as BleConnectionState.Error).message,
-                    onRetry = { viewModel.startScan() }
+                    onRetry = { permissionLauncher.launch(permissions.toTypedArray()) }
                 )
             }
             else -> {
@@ -84,7 +107,7 @@ fun ScanScreen(
                         if (connectionState is BleConnectionState.Scanning) {
                             viewModel.stopScan()
                         } else {
-                            viewModel.startScan()
+                            permissionLauncher.launch(permissions.toTypedArray())
                         }
                     }
                 )
