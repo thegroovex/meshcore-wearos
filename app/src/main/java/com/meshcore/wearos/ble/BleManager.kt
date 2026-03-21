@@ -99,7 +99,7 @@ class BleManager @Inject constructor(
             if (isScanning) {
                 Log.d(TAG, "Scan already in progress, stopping first")
                 stopScan()
-                delay(500) // Cooldown to let the system reset the scanner
+                delay(500)
             }
 
             _scannedDevices.value = emptyList()
@@ -116,8 +116,6 @@ class BleManager @Inject constructor(
             try {
                 isScanning = true
                 scanner.startScan(listOf(scanFilter), scanSettings, scanCallback)
-                
-                // Auto-stop scan after 30 seconds
                 delay(30_000)
                 if (isScanning) stopScan()
             } catch (e: Exception) {
@@ -280,6 +278,11 @@ class BleManager @Inject constructor(
             }
         }
     }
+
+    /**
+     * Alias for sendData to match repository expectations.
+     */
+    fun sendFrame(data: ByteArray): Boolean = sendData(data)
 
     @SuppressLint("MissingPermission")
     fun sendData(data: ByteArray): Boolean {
