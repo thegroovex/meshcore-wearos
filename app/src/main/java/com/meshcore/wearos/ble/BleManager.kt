@@ -24,7 +24,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -86,40 +85,46 @@ class BleManager @Inject constructor(
 
     @SuppressLint("MissingPermission")
     fun startScan() {
-        val scanner = bluetoothAdapter?.bluetoothLeScanner ?: run {
-            _connectionState.value = BleConnectionState.Error("Bluetooth not available")
-            return
-        }
+        scope.launch {
+            val scanner = bluetoothAdapter?.bluetoothLeScanner ?: run {
+                _connectionState.value = BleConnectionState.Error("Bluetooth not available")
+                return@launch
+            }
 
-        if (isScanning) {
-            Log.d(TAG, "Scan already in progress, stopping first")
-            stopScan()
-        }
+            if (bluetoothAdapter?.isEnabled != true) {
+                _connectionState.value = BleConnectionState.Error("Bluetooth is disabled")
+                return@launch
+            }
 
-        _scannedDevices.value = emptyList()
-        _connectionState.value = BleConnectionState.Scanning
+            if (isScanning) {
+                Log.d(TAG, "Scan already in progress, stopping first")
+                stopScan()
+                delay(500) // Cooldown to let the system reset the scanner
+            }
 
-        val scanFilter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid.fromString(NUS_SERVICE_UUID))
-            .build()
+            _scannedDevices.value = emptyList()
+            _connectionState.value = BleConnectionState.Scanning
 
-        val scanSettings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-            .build()
+            val scanFilter = ScanFilter.Builder()
+                .setServiceUuid(ParcelUuid.fromString(NUS_SERVICE_UUID))
+                .build()
 
-        try {
-            isScanning = true
-            scanner.startScan(listOf(scanFilter), scanSettings, scanCallback)
-            
-            // Auto-stop scan after 30 seconds
-            scope.launch {
+            val scanSettings = ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .build()
+
+            try {
+                isScanning = true
+                scanner.startScan(listOf(scanFilter), scanSettings, scanCallback)
+                
+                // Auto-stop scan after 30 seconds
                 delay(30_000)
                 if (isScanning) stopScan()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start scan: ${e.message}")
+                isScanning = false
+                _connectionState.value = BleConnectionState.Error("Scan start failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start scan: ${e.message}")
-            isScanning = false
-            _connectionState.value = BleConnectionState.Error("Scan start failed: ${e.message}")
         }
     }
 
