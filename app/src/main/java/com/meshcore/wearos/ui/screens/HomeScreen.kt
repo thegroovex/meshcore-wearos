@@ -215,7 +215,7 @@ fun HomeScreen(
                 if (isSyncingContacts) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
-                        color = Color.Black,
+                        indicatorColor = Color.Black,
                         strokeWidth = 2.dp
                     )
                 } else {
