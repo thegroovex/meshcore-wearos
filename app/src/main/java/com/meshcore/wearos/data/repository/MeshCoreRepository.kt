@@ -52,6 +52,8 @@ class MeshCoreRepository @Inject constructor(
     private val _isSyncingContacts = MutableStateFlow(false)
     val isSyncingContacts: StateFlow<Boolean> = _isSyncingContacts.asStateFlow()
 
+    private var syncTimeoutJob: kotlinx.coroutines.Job? = null
+
     val connectionState = bleManager.connectionState
     val scannedDevices = bleManager.scannedDevices
 
@@ -124,6 +126,7 @@ class MeshCoreRepository @Inject constructor(
                 contactDao.insertOrUpdateContact(parsed.contact)
             }
             is ParsedFrame.EndOfContacts -> {
+                syncTimeoutJob?.cancel()
                 _isSyncingContacts.value = false
                 Log.i(TAG, "Contact sync complete")
             }
@@ -199,7 +202,20 @@ class MeshCoreRepository @Inject constructor(
     // -------------------------------------------------------------------------
 
     fun syncContacts(since: Long = 0L) {
+        _isSyncingContacts.value = true
+        startSyncTimeout()
         bleManager.sendFrame(MeshCoreProtocol.buildGetContactsFrame(since))
+    }
+
+    private fun startSyncTimeout() {
+        syncTimeoutJob?.cancel()
+        syncTimeoutJob = scope.launch {
+            delay(10_000) // 10 seconds timeout
+            if (_isSyncingContacts.value) {
+                Log.w(TAG, "Sync timeout reached, resetting state")
+                _isSyncingContacts.value = false
+            }
+        }
     }
 
     fun syncDeviceTime() {

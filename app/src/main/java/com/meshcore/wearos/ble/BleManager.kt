@@ -258,6 +258,7 @@ class BleManager @Inject constructor(
 
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
             if (characteristic.uuid == UUID.fromString(NUS_TX_CHAR_UUID)) {
+                Log.d(TAG, "RX NUS Frame: ${value.joinToString(", ") { it.toInt().and(0xFF).toString(16).padStart(2, '0') }}")
                 scope.launch { _incomingFrames.emit(value) }
             }
         }
@@ -266,7 +267,9 @@ class BleManager @Inject constructor(
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
                 if (characteristic.uuid == UUID.fromString(NUS_TX_CHAR_UUID)) {
-                    scope.launch { _incomingFrames.emit(characteristic.value) }
+                    val value = characteristic.value
+                    Log.d(TAG, "RX NUS Frame (Legacy): ${value.joinToString(", ") { it.toInt().and(0xFF).toString(16).padStart(2, '0') }}")
+                    scope.launch { _incomingFrames.emit(value) }
                 }
             }
         }
@@ -288,6 +291,8 @@ class BleManager @Inject constructor(
     fun sendData(data: ByteArray): Boolean {
         val gatt = bluetoothGatt ?: return false
         val char = rxCharacteristic ?: return false
+        
+        Log.d(TAG, "TX NUS Frame: ${data.joinToString(", ") { it.toInt().and(0xFF).toString(16).padStart(2, '0') }}")
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             gatt.writeCharacteristic(char, data, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
