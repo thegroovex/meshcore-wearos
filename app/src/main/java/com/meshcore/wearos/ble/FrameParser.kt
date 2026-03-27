@@ -5,6 +5,7 @@ import com.meshcore.wearos.data.model.Contact
 import com.meshcore.wearos.data.model.DeviceInfo
 import com.meshcore.wearos.data.model.Message
 import com.meshcore.wearos.data.model.MessageDirection
+import com.meshcore.wearos.data.model.MessageStatus
 import com.meshcore.wearos.data.model.NodeType
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -124,7 +125,17 @@ object FrameParser {
         val name = nameBytes.toString(Charsets.UTF_8).trimEnd('\u0000')
         
         Log.d(TAG, "Parsed contact: $name (${pubKey.toHexString().take(8)}...)")
-        return ParsedFrame.ContactFrame(Contact(pubKey, pubKey.toHexString(), name, NodeType.fromAdvType(advType), lastSeen, flags))
+        
+        // Contact constructor: publicKeyHex, publicKey, name, nodeType, lastSeen, flags, ...
+        val contact = Contact(
+            publicKeyHex = pubKey.toHexString(),
+            publicKey = pubKey,
+            name = name,
+            nodeType = NodeType.fromAdvType(advType),
+            lastSeen = lastSeen,
+            flags = flags
+        )
+        return ParsedFrame.ContactFrame(contact)
     }
 
     private fun parseContactMessage(payload: ByteArray, code: Byte): ParsedFrame {
@@ -137,7 +148,19 @@ object FrameParser {
         val msgBytes = ByteArray(buf.remaining())
         buf.get(msgBytes)
         val text = msgBytes.toString(Charsets.UTF_8)
-        return ParsedFrame.MessageReceived(Message(senderPubKey.toHexString(), text, timestamp, MessageDirection.INCOMING, txtType, snr, false))
+        
+        // Message constructor: id, senderPubKeyHex, recipientPubKeyHex, text, timestamp, direction, status, txtType, snr, isChannelMessage, channelIndex, expectedAckCode
+        val message = Message(
+            senderPubKeyHex = senderPubKey.toHexString(),
+            text = text,
+            timestamp = timestamp,
+            direction = MessageDirection.INCOMING,
+            status = MessageStatus.SENT,
+            txtType = txtType,
+            snr = snr,
+            isChannelMessage = false
+        )
+        return ParsedFrame.MessageReceived(message)
     }
 
     private fun parseChannelMessage(payload: ByteArray, code: Byte): ParsedFrame {
@@ -151,7 +174,20 @@ object FrameParser {
         val msgBytes = ByteArray(buf.remaining())
         buf.get(msgBytes)
         val text = msgBytes.toString(Charsets.UTF_8)
-        return ParsedFrame.MessageReceived(Message(senderPubKey.toHexString(), text, timestamp, MessageDirection.INCOMING, txtType, snr, true, channelIdx))
+        
+        // Message constructor: id, senderPubKeyHex, recipientPubKeyHex, text, timestamp, direction, status, txtType, snr, isChannelMessage, channelIndex, expectedAckCode
+        val message = Message(
+            senderPubKeyHex = senderPubKey.toHexString(),
+            text = text,
+            timestamp = timestamp,
+            direction = MessageDirection.INCOMING,
+            status = MessageStatus.SENT,
+            txtType = txtType,
+            snr = snr,
+            isChannelMessage = true,
+            channelIndex = channelIdx
+        )
+        return ParsedFrame.MessageReceived(message)
     }
 
     private fun parseSent(payload: ByteArray): ParsedFrame {
