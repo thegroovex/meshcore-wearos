@@ -4,8 +4,10 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.meshcore.wearos.MeshCoreApplication
 import com.meshcore.wearos.R
@@ -23,9 +25,6 @@ import javax.inject.Inject
 /**
  * MeshCoreBleService is a foreground service that maintains the BLE connection
  * to the MeshCore companion radio even when the app is in the background.
- *
- * On Wear OS, foreground services are essential for reliable BLE communication
- * as the system aggressively manages background processes.
  */
 @AndroidEntryPoint
 class MeshCoreBleService : Service() {
@@ -34,6 +33,13 @@ class MeshCoreBleService : Service() {
     lateinit var repository: MeshCoreRepository
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MeshCore:BleWakeLock")
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -50,9 +56,19 @@ class MeshCoreBleService : Service() {
     private fun startForegroundService() {
         startForeground(NOTIFICATION_ID, buildConnectionNotification("Connecting..."))
 
+        // Keep CPU alive for BLE stability
+        if (wakeLock?.isHeld == false) {
+            wakeLock?.acquire(10 * 60 * 1000L /* 10 min */)
+        }
+
         serviceScope.launch {
             repository.connectionState.collect { state ->
                 updateNotification(state)
+                
+                // Refresh WakeLock when connected
+                if (state is BleConnectionState.Connected) {
+                    if (wakeLock?.isHeld == false) wakeLock?.acquire(10 * 60 * 1000L)
+                }
             }
         }
     }
@@ -107,6 +123,9 @@ class MeshCoreBleService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
+        if (wakeLock?.isHeld == true) {
+            wakeLock?.release()
+        }
     }
 
     companion object {

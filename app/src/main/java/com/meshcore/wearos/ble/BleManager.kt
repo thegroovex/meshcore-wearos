@@ -73,6 +73,8 @@ class BleManager @Inject constructor(
     private var rxCharacteristic: BluetoothGattCharacteristic? = null
     private var txCharacteristic: BluetoothGattCharacteristic? = null
     private var isScanning = false
+    private var lastConnectedAddress: String? = null
+    private var isAutoReconnectEnabled = false
 
     private val _connectionState = MutableStateFlow<BleConnectionState>(BleConnectionState.Disconnected)
     val connectionState: StateFlow<BleConnectionState> = _connectionState.asStateFlow()
@@ -175,11 +177,14 @@ class BleManager @Inject constructor(
     @SuppressLint("MissingPermission")
     fun connect(device: BleDevice) {
         stopScan()
+        lastConnectedAddress = device.address
+        isAutoReconnectEnabled = true
         _connectionState.value = BleConnectionState.Connecting(device.name, device.address)
 
+        // Use TRANSPORT_LE and autoConnect = true for better background stability
         bluetoothGatt = device.device.connectGatt(
             context,
-            false,
+            true, // autoConnect = true is better for background/standby reconnection
             gattCallback,
             BluetoothDevice.TRANSPORT_LE
         )
@@ -199,6 +204,7 @@ class BleManager @Inject constructor(
 
     @SuppressLint("MissingPermission")
     fun disconnect() {
+        isAutoReconnectEnabled = false
         bluetoothGatt?.disconnect()
     }
 
@@ -219,9 +225,18 @@ class BleManager @Inject constructor(
                     gatt.discoverServices()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    Log.i(TAG, "Disconnected from GATT server")
+                    Log.i(TAG, "Disconnected from GATT server, status: $status")
                     _connectionState.value = BleConnectionState.Disconnected
                     close()
+                    
+                    // Trigger auto-reconnect if enabled and it wasn't a manual disconnect
+                    if (isAutoReconnectEnabled && lastConnectedAddress != null) {
+                        Log.i(TAG, "Attempting auto-reconnect to $lastConnectedAddress")
+                        scope.launch {
+                            delay(2000)
+                            connectByAddress(lastConnectedAddress!!)
+                        }
+                    }
                 }
             }
         }
@@ -282,9 +297,6 @@ class BleManager @Inject constructor(
         }
     }
 
-    /**
-     * Alias for sendData to match repository expectations.
-     */
     fun sendFrame(data: ByteArray): Boolean = sendData(data)
 
     @SuppressLint("MissingPermission")
