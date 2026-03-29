@@ -73,8 +73,8 @@ class BleManager @Inject constructor(
     private val _scannedDevices = MutableStateFlow<List<BleDevice>>(emptyList())
     val scannedDevices: StateFlow<List<BleDevice>> = _scannedDevices.asStateFlow()
 
-    private val _incomingFrames = MutableSharedFlow<ByteArray>(extraBufferCapacity = 64)
-    val incomingFrames: SharedFlow<ByteArray> = _incomingFrames.asSharedFlow()
+    private val _incomingFrames = MutableSharedFlow<ParsedFrame>(extraBufferCapacity = 64)
+    val incomingFrames: SharedFlow<ParsedFrame> = _incomingFrames.asSharedFlow()
 
     @SuppressLint("MissingPermission")
     fun startScan() {
@@ -235,8 +235,11 @@ class BleManager @Inject constructor(
 
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
             if (characteristic.uuid == UUID.fromString(NUS_TX_CHAR_UUID)) {
-                Log.d(TAG, "RX NUS Frame: ${value.joinToString(", ") { "%02x".format(it) }}")
-                scope.launch { _incomingFrames.emit(value) }
+                Log.d(TAG, "RX NUS Chunk: ${value.joinToString(", ") { "%02x".format(it) }}")
+                val frames = FrameParser.feed(value)
+                scope.launch { 
+                    frames.forEach { _incomingFrames.emit(it) }
+                }
             }
         }
 
@@ -244,8 +247,11 @@ class BleManager @Inject constructor(
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
                 val value = characteristic.value
-                Log.d(TAG, "RX NUS Frame (Legacy): ${value.joinToString(", ") { "%02x".format(it) }}")
-                scope.launch { _incomingFrames.emit(value) }
+                Log.d(TAG, "RX NUS Chunk (Legacy): ${value.joinToString(", ") { "%02x".format(it) }}")
+                val frames = FrameParser.feed(value)
+                scope.launch { 
+                    frames.forEach { _incomingFrames.emit(it) }
+                }
             }
         }
 

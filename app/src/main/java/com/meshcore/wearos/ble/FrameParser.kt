@@ -41,9 +41,89 @@ sealed class ParsedFrame {
 
 /**
  * FrameParser decodes raw BLE frames received from a MeshCore companion radio.
+ * It handles frame reassembly for multi-packet transmissions.
  */
 object FrameParser {
     private const val TAG = "MeshCore-Parser"
+    
+    // Buffer for multi-packet frames
+    private var frameBuffer = ByteArray(0)
+    private var expectedLength = 0
+    private var currentCode: Byte = -1
+
+    /**
+     * Feeds a raw NUS chunk into the parser. 
+     * Returns a list of ParsedFrames if one or more frames were completed.
+     */
+    fun feed(chunk: ByteArray): List<ParsedFrame> {
+        if (chunk.isEmpty()) return emptyList()
+        
+        val results = mutableListOf<ParsedFrame>()
+        
+        // Simple case: chunk starts with a known code and we are not in the middle of a frame
+        if (frameBuffer.isEmpty()) {
+            val code = chunk[0]
+            val length = getExpectedPayloadLength(code)
+            
+            if (length >= 0 && chunk.size >= length + 1) {
+                // Complete frame in one chunk
+                results.add(parse(chunk.copyOfRange(0, length + 1)))
+                // If there's more data, process it recursively
+                if (chunk.size > length + 1) {
+                    results.addAll(feed(chunk.copyOfRange(length + 1, chunk.size)))
+                }
+            } else if (length > 0) {
+                // Start of a multi-packet frame
+                currentCode = code
+                expectedLength = length
+                frameBuffer = chunk
+            } else {
+                // Single byte command or unknown code
+                results.add(parse(chunk.copyOfRange(0, 1)))
+                if (chunk.size > 1) {
+                    results.addAll(feed(chunk.copyOfRange(1, chunk.size)))
+                }
+            }
+        } else {
+            // Append to existing buffer
+            frameBuffer += chunk
+            if (frameBuffer.size >= expectedLength + 1) {
+                // Frame complete
+                results.add(parse(frameBuffer.copyOfRange(0, expectedLength + 1)))
+                val remaining = if (frameBuffer.size > expectedLength + 1) {
+                    frameBuffer.copyOfRange(expectedLength + 1, frameBuffer.size)
+                } else null
+                
+                frameBuffer = ByteArray(0)
+                expectedLength = 0
+                currentCode = -1
+                
+                if (remaining != null) {
+                    results.addAll(feed(remaining))
+                }
+            }
+        }
+        
+        return results
+    }
+
+    private fun getExpectedPayloadLength(code: Byte): Int {
+        return when (code) {
+            MeshCoreProtocol.RESP_CODE_OK -> 0
+            MeshCoreProtocol.RESP_CODE_ERR -> 1
+            MeshCoreProtocol.RESP_CODE_CONTACTS_START -> 0
+            MeshCoreProtocol.RESP_CODE_CONTACT -> 32 + 1 + 1 + 4 // pubkey + type + flags + lastseen (name is dynamic, but we assume fixed for now or handle separately)
+            MeshCoreProtocol.RESP_CODE_END_OF_CONTACTS -> 4 // timestamp in v3
+            MeshCoreProtocol.RESP_CODE_SELF_INFO -> 32 + 1 // + name (dynamic)
+            MeshCoreProtocol.RESP_CODE_SENT -> 4
+            MeshCoreProtocol.RESP_CODE_CURR_TIME -> 4
+            MeshCoreProtocol.RESP_CODE_BATT_AND_STORAGE -> 6
+            MeshCoreProtocol.RESP_CODE_DEVICE_INFO -> 32 + 1 // + name (dynamic)
+            MeshCoreProtocol.PUSH_CODE_MSG_WAITING -> 0
+            MeshCoreProtocol.RESP_CODE_NO_MORE_MESSAGES -> 0
+            else -> -1 // Unknown or dynamic
+        }
+    }
 
     fun parse(frame: ByteArray): ParsedFrame {
         if (frame.isEmpty()) return ParsedFrame.Unknown(0, frame)
@@ -113,7 +193,6 @@ object FrameParser {
     }
 
     private fun parseContact(payload: ByteArray): ParsedFrame {
-        // V3 Contact Frame: 32 bytes pubkey + 1 byte advType + 1 byte flags + 4 bytes lastSeen + name...
         if (payload.size < 32) return ParsedFrame.Unknown(MeshCoreProtocol.RESP_CODE_CONTACT, payload)
         val buf = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
         val pubKey = ByteArray(32).also { buf.get(it) }
@@ -122,11 +201,10 @@ object FrameParser {
         val lastSeen = if (buf.remaining() >= 4) buf.int.toLong() and 0xFFFFFFFFL else 0L
         val nameBytes = ByteArray(buf.remaining())
         buf.get(nameBytes)
-        val name = nameBytes.toString(Charsets.UTF_8).trimEnd('\u0000')
+        val name = nameBytes.toString(Charsets.UTF_8).trimEnd('\u0000').ifEmpty { "Node ${pubKey.toHexString().take(4)}" }
         
         Log.d(TAG, "Parsed contact: $name (${pubKey.toHexString().take(8)}...)")
         
-        // Contact constructor: publicKeyHex, publicKey, name, nodeType, lastSeen, flags, ...
         val contact = Contact(
             publicKeyHex = pubKey.toHexString(),
             publicKey = pubKey,
@@ -149,7 +227,6 @@ object FrameParser {
         buf.get(msgBytes)
         val text = msgBytes.toString(Charsets.UTF_8)
         
-        // Message constructor: id, senderPubKeyHex, recipientPubKeyHex, text, timestamp, direction, status, txtType, snr, isChannelMessage, channelIndex, expectedAckCode
         val message = Message(
             senderPubKeyHex = senderPubKey.toHexString(),
             text = text,
@@ -175,7 +252,6 @@ object FrameParser {
         buf.get(msgBytes)
         val text = msgBytes.toString(Charsets.UTF_8)
         
-        // Message constructor: id, senderPubKeyHex, recipientPubKeyHex, text, timestamp, direction, status, txtType, snr, isChannelMessage, channelIndex, expectedAckCode
         val message = Message(
             senderPubKeyHex = senderPubKey.toHexString(),
             text = text,

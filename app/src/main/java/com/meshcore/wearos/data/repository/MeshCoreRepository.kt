@@ -3,7 +3,6 @@ package com.meshcore.wearos.data.repository
 import android.util.Log
 import com.meshcore.wearos.ble.BleConnectionState
 import com.meshcore.wearos.ble.BleManager
-import com.meshcore.wearos.ble.FrameParser
 import com.meshcore.wearos.ble.MeshCoreProtocol
 import com.meshcore.wearos.ble.ParsedFrame
 import com.meshcore.wearos.data.db.ContactDao
@@ -52,7 +51,8 @@ class MeshCoreRepository @Inject constructor(
     init {
         scope.launch {
             bleManager.incomingFrames.collect { frame ->
-                processIncomingFrame(frame)
+                Log.d(TAG, "Processing frame: ${frame::class.simpleName}")
+                processParsedFrame(frame)
             }
         }
 
@@ -75,10 +75,7 @@ class MeshCoreRepository @Inject constructor(
         bleManager.sendFrame(MeshCoreProtocol.buildSimpleCommand(MeshCoreProtocol.CMD_DEVICE_QUERY))
     }
 
-    private suspend fun processIncomingFrame(rawFrame: ByteArray) {
-        val parsed = FrameParser.parse(rawFrame)
-        Log.d(TAG, "Received frame: ${parsed::class.simpleName}")
-
+    private suspend fun processParsedFrame(parsed: ParsedFrame) {
         when (parsed) {
             is ParsedFrame.DeviceInfoFrame -> {
                 _deviceInfo.value = parsed.info
