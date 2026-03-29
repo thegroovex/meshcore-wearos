@@ -36,9 +36,6 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Represents the current BLE connection state.
- */
 sealed class BleConnectionState {
     data object Disconnected : BleConnectionState()
     data object Scanning : BleConnectionState()
@@ -47,9 +44,6 @@ sealed class BleConnectionState {
     data class Error(val message: String) : BleConnectionState()
 }
 
-/**
- * Represents a discovered BLE device during scanning.
- */
 data class BleDevice(
     val name: String,
     val address: String,
@@ -57,9 +51,6 @@ data class BleDevice(
     val device: BluetoothDevice
 )
 
-/**
- * BleManager handles all Bluetooth Low Energy operations for the MeshCore WearOS client.
- */
 @Singleton
 class BleManager @Inject constructor(
     @ApplicationContext private val context: Context
@@ -99,7 +90,6 @@ class BleManager @Inject constructor(
             }
 
             if (isScanning) {
-                Log.d(TAG, "Scan already in progress, stopping first")
                 stopScan()
                 delay(500)
             }
@@ -149,13 +139,7 @@ class BleManager @Inject constructor(
             val device = result.device
             val name = device.name ?: "Unknown"
             val address = device.address
-
-            val bleDevice = BleDevice(
-                name = name,
-                address = address,
-                rssi = result.rssi,
-                device = device
-            )
+            val bleDevice = BleDevice(name, address, result.rssi, device)
 
             val current = _scannedDevices.value.toMutableList()
             val existingIndex = current.indexOfFirst { it.address == address }
@@ -168,7 +152,7 @@ class BleManager @Inject constructor(
         }
 
         override fun onScanFailed(errorCode: Int) {
-            Log.e(TAG, "BLE scan failed with error code: $errorCode")
+            Log.e(TAG, "BLE scan failed: $errorCode")
             isScanning = false
             _connectionState.value = BleConnectionState.Error("Scan failed (code $errorCode)")
         }
@@ -181,10 +165,9 @@ class BleManager @Inject constructor(
         isAutoReconnectEnabled = true
         _connectionState.value = BleConnectionState.Connecting(device.name, device.address)
 
-        // Use TRANSPORT_LE and autoConnect = true for better background stability
         bluetoothGatt = device.device.connectGatt(
             context,
-            true, // autoConnect = true is better for background/standby reconnection
+            true, // autoConnect = true
             gattCallback,
             BluetoothDevice.TRANSPORT_LE
         )
@@ -193,13 +176,7 @@ class BleManager @Inject constructor(
     @SuppressLint("MissingPermission")
     fun connectByAddress(address: String) {
         val device = bluetoothAdapter?.getRemoteDevice(address) ?: return
-        val bleDevice = BleDevice(
-            name = device.name ?: address,
-            address = address,
-            rssi = 0,
-            device = device
-        )
-        connect(bleDevice)
+        connect(BleDevice(device.name ?: address, address, 0, device))
     }
 
     @SuppressLint("MissingPermission")
@@ -221,17 +198,15 @@ class BleManager @Inject constructor(
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
-                    Log.i(TAG, "Connected to GATT server, discovering services...")
+                    Log.i(TAG, "Connected to GATT, discovering services...")
+                    gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
                     gatt.discoverServices()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    Log.i(TAG, "Disconnected from GATT server, status: $status")
+                    Log.i(TAG, "Disconnected, status: $status")
                     _connectionState.value = BleConnectionState.Disconnected
                     close()
-                    
-                    // Trigger auto-reconnect if enabled and it wasn't a manual disconnect
                     if (isAutoReconnectEnabled && lastConnectedAddress != null) {
-                        Log.i(TAG, "Attempting auto-reconnect to $lastConnectedAddress")
                         scope.launch {
                             delay(2000)
                             connectByAddress(lastConnectedAddress!!)
@@ -242,38 +217,25 @@ class BleManager @Inject constructor(
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            if (status != BluetoothGatt.GATT_SUCCESS) {
-                _connectionState.value = BleConnectionState.Error("Service discovery failed")
-                return
-            }
+            if (status != BluetoothGatt.GATT_SUCCESS) return
 
-            val nusService = gatt.getService(UUID.fromString(NUS_SERVICE_UUID))
-            if (nusService == null) {
-                _connectionState.value = BleConnectionState.Error("NUS service not found")
-                disconnect()
-                return
-            }
-
+            val nusService = gatt.getService(UUID.fromString(NUS_SERVICE_UUID)) ?: return
             rxCharacteristic = nusService.getCharacteristic(UUID.fromString(NUS_RX_CHAR_UUID))
             txCharacteristic = nusService.getCharacteristic(UUID.fromString(NUS_TX_CHAR_UUID))
 
-            if (rxCharacteristic == null || txCharacteristic == null) {
-                _connectionState.value = BleConnectionState.Error("NUS characteristics not found")
-                disconnect()
-                return
-            }
-
-            gatt.setCharacteristicNotification(txCharacteristic!!, true)
-            val descriptor = txCharacteristic!!.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
-            if (descriptor != null) {
-                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                gatt.writeDescriptor(descriptor)
+            if (rxCharacteristic != null && txCharacteristic != null) {
+                gatt.setCharacteristicNotification(txCharacteristic!!, true)
+                val descriptor = txCharacteristic!!.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
+                if (descriptor != null) {
+                    descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    gatt.writeDescriptor(descriptor)
+                }
             }
         }
 
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
             if (characteristic.uuid == UUID.fromString(NUS_TX_CHAR_UUID)) {
-                Log.d(TAG, "RX NUS Frame: ${value.joinToString(", ") { it.toInt().and(0xFF).toString(16).padStart(2, '0') }}")
+                Log.d(TAG, "RX NUS Frame: ${value.joinToString(", ") { "%02x".format(it) }}")
                 scope.launch { _incomingFrames.emit(value) }
             }
         }
@@ -281,11 +243,9 @@ class BleManager @Inject constructor(
         @Deprecated("Deprecated in API 33")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                if (characteristic.uuid == UUID.fromString(NUS_TX_CHAR_UUID)) {
-                    val value = characteristic.value
-                    Log.d(TAG, "RX NUS Frame (Legacy): ${value.joinToString(", ") { it.toInt().and(0xFF).toString(16).padStart(2, '0') }}")
-                    scope.launch { _incomingFrames.emit(value) }
-                }
+                val value = characteristic.value
+                Log.d(TAG, "RX NUS Frame (Legacy): ${value.joinToString(", ") { "%02x".format(it) }}")
+                scope.launch { _incomingFrames.emit(value) }
             }
         }
 
@@ -303,9 +263,7 @@ class BleManager @Inject constructor(
     fun sendData(data: ByteArray): Boolean {
         val gatt = bluetoothGatt ?: return false
         val char = rxCharacteristic ?: return false
-        
-        Log.d(TAG, "TX NUS Frame: ${data.joinToString(", ") { it.toInt().and(0xFF).toString(16).padStart(2, '0') }}")
-        
+        Log.d(TAG, "TX NUS Frame: ${data.joinToString(", ") { "%02x".format(it) }}")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             gatt.writeCharacteristic(char, data, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
         } else {
