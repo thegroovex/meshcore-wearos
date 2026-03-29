@@ -41,15 +41,12 @@ sealed class ParsedFrame {
 
 /**
  * FrameParser decodes raw BLE frames received from a MeshCore companion radio.
- * It handles frame reassembly for multi-packet transmissions.
+ * It handles frame reassembly for multi-packet transmissions using a stream-based approach.
  */
 object FrameParser {
     private const val TAG = "MeshCore-Parser"
     
-    // Buffer for multi-packet frames
-    private var frameBuffer = ByteArray(0)
-    private var expectedLength = 0
-    private var currentCode: Byte = -1
+    private var streamBuffer = ByteArray(0)
 
     /**
      * Feeds a raw NUS chunk into the parser. 
@@ -58,71 +55,84 @@ object FrameParser {
     fun feed(chunk: ByteArray): List<ParsedFrame> {
         if (chunk.isEmpty()) return emptyList()
         
+        streamBuffer += chunk
         val results = mutableListOf<ParsedFrame>()
         
-        // Simple case: chunk starts with a known code and we are not in the middle of a frame
-        if (frameBuffer.isEmpty()) {
-            val code = chunk[0]
-            val length = getExpectedPayloadLength(code)
+        var offset = 0
+        while (offset < streamBuffer.size) {
+            val code = streamBuffer[offset]
+            val remaining = streamBuffer.size - offset - 1
             
-            if (length >= 0 && chunk.size >= length + 1) {
-                // Complete frame in one chunk
-                results.add(parse(chunk.copyOfRange(0, length + 1)))
-                // If there's more data, process it recursively
-                if (chunk.size > length + 1) {
-                    results.addAll(feed(chunk.copyOfRange(length + 1, chunk.size)))
+            // Determine frame length based on code
+            val payloadLength = when (code) {
+                MeshCoreProtocol.RESP_CODE_OK -> 0
+                MeshCoreProtocol.RESP_CODE_ERR -> 1
+                MeshCoreProtocol.RESP_CODE_CONTACTS_START -> 0
+                MeshCoreProtocol.RESP_CODE_CONTACT -> {
+                    // V3 Contact: 32(pubkey) + 1(type) + 1(flags) + 4(lastSeen) = 38 bytes min
+                    // Name is dynamic. We look for the next known command code or end of buffer.
+                    // For now, assume it's the rest of the buffer IF it's the only frame, 
+                    // or use a lookahead to find the next valid RESP_CODE.
+                    findNextFrameOffset(streamBuffer, offset + 1) - (offset + 1)
                 }
-            } else if (length > 0) {
-                // Start of a multi-packet frame
-                currentCode = code
-                expectedLength = length
-                frameBuffer = chunk
+                MeshCoreProtocol.RESP_CODE_END_OF_CONTACTS -> 4
+                MeshCoreProtocol.RESP_CODE_SELF_INFO -> findNextFrameOffset(streamBuffer, offset + 1) - (offset + 1)
+                MeshCoreProtocol.RESP_CODE_SENT -> 4
+                MeshCoreProtocol.RESP_CODE_CURR_TIME -> 4
+                MeshCoreProtocol.RESP_CODE_BATT_AND_STORAGE -> 6
+                MeshCoreProtocol.RESP_CODE_DEVICE_INFO -> findNextFrameOffset(streamBuffer, offset + 1) - (offset + 1)
+                MeshCoreProtocol.PUSH_CODE_MSG_WAITING -> 0
+                MeshCoreProtocol.RESP_CODE_NO_MORE_MESSAGES -> 0
+                MeshCoreProtocol.RESP_CODE_CONTACT_MSG_RECV,
+                MeshCoreProtocol.RESP_CODE_CONTACT_MSG_RECV_V3,
+                MeshCoreProtocol.RESP_CODE_CHANNEL_MSG_RECV,
+                MeshCoreProtocol.RESP_CODE_CHANNEL_MSG_RECV_V3 -> findNextFrameOffset(streamBuffer, offset + 1) - (offset + 1)
+                else -> -1 // Unknown code
+            }
+
+            if (payloadLength == -1) {
+                Log.w(TAG, "Unknown/Invalid code at offset $offset: $code (hex: ${"%02x".format(code)})")
+                // Try to recover by skipping one byte
+                offset++
+                continue
+            }
+
+            if (remaining >= payloadLength) {
+                // We have enough data for a full frame
+                val frameData = streamBuffer.copyOfRange(offset, offset + 1 + payloadLength)
+                results.add(parse(frameData))
+                offset += 1 + payloadLength
             } else {
-                // Single byte command or unknown code
-                results.add(parse(chunk.copyOfRange(0, 1)))
-                if (chunk.size > 1) {
-                    results.addAll(feed(chunk.copyOfRange(1, chunk.size)))
-                }
+                // Not enough data yet, wait for more chunks
+                break
             }
+        }
+        
+        // Keep only the unprocessed part of the buffer
+        streamBuffer = if (offset < streamBuffer.size) {
+            streamBuffer.copyOfRange(offset, streamBuffer.size)
         } else {
-            // Append to existing buffer
-            frameBuffer += chunk
-            if (frameBuffer.size >= expectedLength + 1) {
-                // Frame complete
-                results.add(parse(frameBuffer.copyOfRange(0, expectedLength + 1)))
-                val remaining = if (frameBuffer.size > expectedLength + 1) {
-                    frameBuffer.copyOfRange(expectedLength + 1, frameBuffer.size)
-                } else null
-                
-                frameBuffer = ByteArray(0)
-                expectedLength = 0
-                currentCode = -1
-                
-                if (remaining != null) {
-                    results.addAll(feed(remaining))
-                }
-            }
+            ByteArray(0)
         }
         
         return results
     }
 
-    private fun getExpectedPayloadLength(code: Byte): Int {
-        return when (code) {
-            MeshCoreProtocol.RESP_CODE_OK -> 0
-            MeshCoreProtocol.RESP_CODE_ERR -> 1
-            MeshCoreProtocol.RESP_CODE_CONTACTS_START -> 0
-            MeshCoreProtocol.RESP_CODE_CONTACT -> 32 + 1 + 1 + 4 // pubkey + type + flags + lastseen (name is dynamic, but we assume fixed for now or handle separately)
-            MeshCoreProtocol.RESP_CODE_END_OF_CONTACTS -> 4 // timestamp in v3
-            MeshCoreProtocol.RESP_CODE_SELF_INFO -> 32 + 1 // + name (dynamic)
-            MeshCoreProtocol.RESP_CODE_SENT -> 4
-            MeshCoreProtocol.RESP_CODE_CURR_TIME -> 4
-            MeshCoreProtocol.RESP_CODE_BATT_AND_STORAGE -> 6
-            MeshCoreProtocol.RESP_CODE_DEVICE_INFO -> 32 + 1 // + name (dynamic)
-            MeshCoreProtocol.PUSH_CODE_MSG_WAITING -> 0
-            MeshCoreProtocol.RESP_CODE_NO_MORE_MESSAGES -> 0
-            else -> -1 // Unknown or dynamic
+    /**
+     * Look ahead to find the start of the next valid frame.
+     */
+    private fun findNextFrameOffset(buffer: ByteArray, start: Int): Int {
+        for (i in start until buffer.size) {
+            val code = buffer[i]
+            // These codes are unlikely to appear as random bytes in a name or pubkey
+            if (code == MeshCoreProtocol.RESP_CODE_CONTACT || 
+                code == MeshCoreProtocol.RESP_CODE_END_OF_CONTACTS ||
+                code == MeshCoreProtocol.RESP_CODE_OK ||
+                code == MeshCoreProtocol.RESP_CODE_CONTACTS_START) {
+                return i
+            }
         }
+        return buffer.size
     }
 
     fun parse(frame: ByteArray): ParsedFrame {
