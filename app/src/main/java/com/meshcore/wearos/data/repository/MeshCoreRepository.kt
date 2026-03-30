@@ -70,23 +70,26 @@ class MeshCoreRepository @Inject constructor(
     fun connect(address: String) = bleManager.connectByAddress(address)
     fun disconnect() = bleManager.disconnect()
 
-    private fun initializeSession() {
-        Log.i(TAG, "Connection established, initializing MeshCore session")
-        bleManager.sendFrame(MeshCoreProtocol.buildSimpleCommand(MeshCoreProtocol.CMD_DEVICE_QUERY))
-    }
+private fun initializeSession() {
+    Log.i(TAG, "Connection established, initializing MeshCore session")
+    // CMD_APP_START MUSS als erstes gesendet werden.
+    // Node antwortet mit RESP_CODE_SELF_INFO → dann syncContacts() etc.
+    bleManager.sendFrame(MeshCoreProtocol.buildAppStartFrame())
+}
 
-    private suspend fun processParsedFrame(parsed: ParsedFrame) {
-        when (parsed) {
-            is ParsedFrame.DeviceInfoFrame -> {
-                _deviceInfo.value = parsed.info
-                bleManager.sendFrame(MeshCoreProtocol.buildAppStartFrame())
-            }
-            is ParsedFrame.SelfInfo -> {
-                _deviceInfo.value = parsed.deviceInfo
-                syncContacts()
-                syncDeviceTime()
-                fetchBatteryStatus()
-            }
+// In processParsedFrame():
+is ParsedFrame.SelfInfo -> {
+    _deviceInfo.value = parsed.deviceInfo
+    // Jetzt erst DEVICE_QUERY für erweiterte Infos (optional)
+    bleManager.sendFrame(MeshCoreProtocol.buildSimpleCommand(MeshCoreProtocol.CMD_DEVICE_QUERY))
+    syncContacts()
+    syncDeviceTime()
+    fetchBatteryStatus()
+}
+is ParsedFrame.DeviceInfoFrame -> {
+    // Ergänzt _deviceInfo mit den zusätzlichen Feldern aus DEVICE_QUERY
+    _deviceInfo.value = parsed.info
+}
             is ParsedFrame.ContactsStart -> {
                 Log.d(TAG, "Contact sync started")
                 _isSyncingContacts.value = true
