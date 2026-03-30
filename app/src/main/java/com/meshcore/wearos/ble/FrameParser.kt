@@ -75,7 +75,7 @@ object FrameParser {
                     // or use a lookahead to find the next valid RESP_CODE.
                     findNextFrameOffset(streamBuffer, offset + 1) - (offset + 1)
                 }
-                MeshCoreProtocol.RESP_CODE_END_OF_CONTACTS -> 4
+                MeshCoreProtocol.RESP_CODE_END_OF_CONTACTS -> 0
                 MeshCoreProtocol.RESP_CODE_SELF_INFO -> findNextFrameOffset(streamBuffer, offset + 1) - (offset + 1)
                 MeshCoreProtocol.RESP_CODE_SENT -> 4
                 MeshCoreProtocol.RESP_CODE_CURR_TIME -> 4
