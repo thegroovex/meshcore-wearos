@@ -271,7 +271,7 @@ class BleManager @Inject constructor(
         val char = rxCharacteristic ?: return false
         Log.d(TAG, "TX NUS Frame: ${data.joinToString(", ") { "%02x".format(it) }}")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gatt.writeCharacteristic(char, data, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+            gatt.writeCharacteristic(char, data, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
         } else {
             char.value = data
             char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
