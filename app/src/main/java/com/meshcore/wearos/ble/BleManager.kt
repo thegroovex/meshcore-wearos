@@ -17,6 +17,7 @@ import android.content.Context
 import android.os.Build
 import android.os.ParcelUuid
 import android.util.Log
+import com.meshcore.wearos.ble.ParsedFrame
 import com.meshcore.wearos.ble.MeshCoreProtocol.NUS_RX_CHAR_UUID
 import com.meshcore.wearos.ble.MeshCoreProtocol.NUS_SERVICE_UUID
 import com.meshcore.wearos.ble.MeshCoreProtocol.NUS_TX_CHAR_UUID

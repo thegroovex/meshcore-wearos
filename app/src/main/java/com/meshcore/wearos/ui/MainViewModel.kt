@@ -57,7 +57,7 @@ class MainViewModel @Inject constructor(
     fun syncContacts() = repository.syncContacts()
     fun syncMessages() = repository.syncMessages()
     fun fetchBatteryStatus() = repository.fetchBatteryStatus()
-    fun sendSelfAdvert() = repository.sendSelfAdvert()
+    fun sendSelfAdvert(floodMode: Boolean = false) = repository.sendSelfAdvert(floodMode)
 
     fun sendDirectMessage(contact: Contact, text: String) {
         viewModelScope.launch {

@@ -70,26 +70,23 @@ class MeshCoreRepository @Inject constructor(
     fun connect(address: String) = bleManager.connectByAddress(address)
     fun disconnect() = bleManager.disconnect()
 
-private fun initializeSession() {
-    Log.i(TAG, "Connection established, initializing MeshCore session")
-    // CMD_APP_START MUSS als erstes gesendet werden.
-    // Node antwortet mit RESP_CODE_SELF_INFO → dann syncContacts() etc.
-    bleManager.sendFrame(MeshCoreProtocol.buildAppStartFrame())
-}
+    private fun initializeSession() {
+        Log.i(TAG, "Connection established, initializing MeshCore session")
+        bleManager.sendFrame(MeshCoreProtocol.buildAppStartFrame())
+    }
 
-// In processParsedFrame():
-is ParsedFrame.SelfInfo -> {
-    _deviceInfo.value = parsed.deviceInfo
-    // Jetzt erst DEVICE_QUERY für erweiterte Infos (optional)
-    bleManager.sendFrame(MeshCoreProtocol.buildSimpleCommand(MeshCoreProtocol.CMD_DEVICE_QUERY))
-    syncContacts()
-    syncDeviceTime()
-    fetchBatteryStatus()
-}
-is ParsedFrame.DeviceInfoFrame -> {
-    // Ergänzt _deviceInfo mit den zusätzlichen Feldern aus DEVICE_QUERY
-    _deviceInfo.value = parsed.info
-}
+    private fun processParsedFrame(parsed: ParsedFrame) {
+        when (parsed) {
+            is ParsedFrame.SelfInfo -> {
+                _deviceInfo.value = parsed.deviceInfo
+                bleManager.sendFrame(MeshCoreProtocol.buildSimpleCommand(MeshCoreProtocol.CMD_DEVICE_QUERY))
+                syncContacts()
+                syncDeviceTime()
+                fetchBatteryStatus()
+            }
+            is ParsedFrame.DeviceInfoFrame -> {
+                _deviceInfo.value = parsed.info
+            }
             is ParsedFrame.ContactsStart -> {
                 Log.d(TAG, "Contact sync started")
                 _isSyncingContacts.value = true
@@ -97,7 +94,9 @@ is ParsedFrame.DeviceInfoFrame -> {
             is ParsedFrame.ContactFrame -> {
                 Log.d(TAG, "Inserting contact to DB: ${parsed.contact.name} (${parsed.contact.publicKeyHex})")
                 try {
-                    contactDao.insertOrUpdateContact(parsed.contact)
+                    scope.launch {
+                        contactDao.insertOrUpdateContact(parsed.contact)
+                    }
                     Log.d(TAG, "Contact saved successfully")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to save contact: ${e.message}")
@@ -109,7 +108,9 @@ is ParsedFrame.DeviceInfoFrame -> {
                 Log.i(TAG, "Contact sync complete")
             }
             is ParsedFrame.MessageReceived -> {
-                handleIncomingMessage(parsed.message)
+                scope.launch {
+                    handleIncomingMessage(parsed.message)
+                }
             }
             is ParsedFrame.MessageWaiting -> {
                 bleManager.sendFrame(MeshCoreProtocol.buildSimpleCommand(MeshCoreProtocol.CMD_SYNC_NEXT_MESSAGE))
@@ -121,10 +122,12 @@ is ParsedFrame.DeviceInfoFrame -> {
                 Log.d(TAG, "Message sent, expected ACK: ${parsed.expectedAckCode}")
             }
             is ParsedFrame.SendConfirmed -> {
-                messageDao.updateMessageStatusByAck(
-                    ackCode = parsed.ackCode,
-                    status = MessageStatus.DELIVERED.name
-                )
+                scope.launch {
+                    messageDao.updateMessageStatusByAck(
+                        ackCode = parsed.ackCode,
+                        status = MessageStatus.DELIVERED.name
+                    )
+                }
                 Log.i(TAG, "Message delivered, RTT: ${parsed.roundTripMs}ms")
             }
             is ParsedFrame.BatteryAndStorage -> {

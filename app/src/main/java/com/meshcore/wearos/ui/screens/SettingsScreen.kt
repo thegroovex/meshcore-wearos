@@ -52,7 +52,7 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp),
-                onClick = { viewModel.sendSelfAdvert(/* floodMode = */ ) },
+                onClick = { viewModel.sendSelfAdvert(false) },
                 label = { Text("Send Advert", style = MaterialTheme.typography.body2) },
                 secondaryLabel = {
                     Text(

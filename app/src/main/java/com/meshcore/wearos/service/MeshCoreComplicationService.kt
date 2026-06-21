@@ -9,6 +9,7 @@ import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.ShortTextComplicationData
 import androidx.wear.watchface.complications.datasource.ComplicationDataSourceService
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
+import androidx.wear.watchface.complications.data.ComplicationData
 import com.meshcore.wearos.ble.BleConnectionState
 import com.meshcore.wearos.data.repository.MeshCoreRepository
 import com.meshcore.wearos.ui.MainActivity
@@ -44,10 +45,9 @@ class MeshCoreComplicationService : ComplicationDataSourceService() {
         }
     }
 
-    override fun onComplicationRequest(
-        request: ComplicationRequest,
-        listener: ComplicationRequestListener
-    ) {
+    override fun onComplicationUpdate(
+        request: ComplicationRequest
+    ): ComplicationData? {
         val connectionState = repository.connectionState.value
         val (shortStatus, longStatus) = when (connectionState) {
             is BleConnectionState.Connected -> Pair("Mesh", "MeshCore: ${connectionState.deviceName}")
@@ -57,12 +57,11 @@ class MeshCoreComplicationService : ComplicationDataSourceService() {
             is BleConnectionState.Error -> Pair("Err", "MeshCore: Error")
         }
 
-        val data = when (request.complicationType) {
+        return when (request.complicationType) {
             ComplicationType.SHORT_TEXT -> buildShortTextComplication("Mesh", shortStatus)
             ComplicationType.LONG_TEXT -> buildLongTextComplication(longStatus)
             else -> null
         }
-        listener.onComplicationData(data)
     }
 
     private fun buildShortTextComplication(title: String, text: String): ShortTextComplicationData {
