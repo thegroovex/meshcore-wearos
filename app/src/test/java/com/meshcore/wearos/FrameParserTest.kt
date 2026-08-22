@@ -73,10 +73,10 @@ class FrameParserTest {
 
     @Test
     fun `parse RESP_CODE_CURR_TIME returns ParsedFrame_CurrentTime`() {
-        // Epoch 1700000000 = 0x655A7C00 (little-endian: 00 7C 5A 65)
+        // Epoch 1700000000 = 0x6553F100 (little-endian: 00 F1 53 65)
         val frame = byteArrayOf(
             MeshCoreProtocol.RESP_CODE_CURR_TIME,
-            0x00.toByte(), 0x7C.toByte(), 0x5A.toByte(), 0x65.toByte()
+            0x00.toByte(), 0xF1.toByte(), 0x53.toByte(), 0x65.toByte()
         )
         val result = FrameParser.parse(frame)
         assertTrue(result is ParsedFrame.CurrentTime)
