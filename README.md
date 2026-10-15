@@ -10,20 +10,19 @@ MeshCore WearOS allows you to communicate over a MeshCore LoRa mesh network dire
 
 | Feature | Status |
 |---|---|
-| BLE device scanning & connection | ✅ |
-| Contact list synchronization | ✅ |
-| Direct messaging (DM) | ✅ |
-| Quick reply with preset messages | ✅ |
-| Message delivery confirmation (ACK) | ✅ |
-| Push notifications for new messages | ✅ |
-| Battery & storage monitoring | ✅ |
-| Self-advertisement broadcast | ✅ |
-| Wear OS Tile for quick status | ✅ |
-| Watch Face Complication | ✅ |
+| BLE scan, bonding with automatic PIN entry, MTU negotiation | ✅ |
+| Auto-reconnect with back-off, reconnect to last radio on start | ✅ |
+| Contact sync (full + incremental on adverts) | ✅ |
+| Direct messages with free text (keyboard / voice) and quick replies | ✅ |
+| Delivery receipts (ACK) with automatic retries, tap to resend | ✅ |
+| Channel (group) messages incl. Public channel | ✅ |
+| Notifications per conversation, deep link into the chat | ✅ |
+| Battery, storage, firmware and radio info | ✅ |
+| Zero-hop and flood adverts, route reset per contact | ✅ |
+| Wear OS Tile and watch-face complication (status + unread) | ✅ |
 | Foreground BLE service | ✅ |
-| Channel messaging | 🚧 |
 | Node map view | 🚧 |
-| Repeater CLI access | 🚧 |
+| Repeater CLI / room login | 🚧 |
 
 ## Architecture
 
@@ -58,10 +57,15 @@ Persistence Layer (Room Database)
 This app implements the [MeshCore Companion Radio Protocol](https://github.com/meshcore-dev/MeshCore/wiki/Companion-Radio-Protocol) (Protocol Version 3).
 
 Communication uses the **Nordic UART Service (NUS)** over BLE:
-- **RX Characteristic** (`6E400002-...`): App → Radio (write without response)
+- **RX Characteristic** (`6E400002-...`): App → Radio (write with response; the ESP32 firmware does not accept write-without-response)
 - **TX Characteristic** (`6E400003-...`): Radio → App (notify)
 
-Each BLE characteristic value is a single complete protocol frame. The first byte is the command or response code.
+Rules the client relies on (taken from `examples/companion_radio/MyMesh.cpp`):
+
+- Each BLE write / notification is exactly **one** complete frame. There is no stream framing over BLE, so the client never splits or re-assembles frames. An MTU of 185 is requested because frames are up to 176 bytes.
+- The characteristics require an encrypted, bonded link (MITM). The watch bonds first; the PIN from *Settings → Radio BLE PIN* (default `123456`) is supplied automatically.
+- Every command gets exactly one response frame. Commands are sent one at a time and wait for their response (5 s timeout), so OK/ERR can be attributed and the radio's small receive queue never overflows. Push frames (`0x80+`) and the contact stream are handled separately.
+- Session start: `CMD_DEVICE_QUERY(ver 3)` → `CMD_APP_START` → set clock → battery → contacts → channels → drain message queue.
 
 ## Requirements
 
@@ -71,10 +75,15 @@ Each BLE characteristic value is a single complete protocol frame. The first byt
 
 ## Building
 
+Requires JDK 17 and the Android SDK (platform 35, build-tools 35.0.0).
+
 ```bash
 # Clone the repository
 git clone https://github.com/thegroovex/meshcore-wearos.git
 cd meshcore-wearos
+
+# Unit tests (protocol encoder / frame parser against the firmware wire format)
+./gradlew testDebugUnitTest
 
 # Build debug APK
 ./gradlew assembleDebug

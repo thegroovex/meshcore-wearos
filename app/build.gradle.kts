@@ -9,13 +9,14 @@ plugins {
 android {
     namespace = "com.meshcore.wearos"
     compileSdk = 35
+    buildToolsVersion = "35.0.0"
 
     defaultConfig {
         applicationId = "com.meshcore.wearos"
         minSdk = 30  // Wear OS 3.0 (API 30)
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
     }
 
     buildTypes {
@@ -45,6 +46,10 @@ android {
         compose = true
         buildConfig = true
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -68,6 +73,7 @@ dependencies {
     implementation(libs.wear.tiles)
     implementation(libs.wear.tiles.material)
     implementation(libs.wear)
+    implementation(libs.wear.input)
 
     // Horologist
     implementation(libs.horologist.compose.layout)

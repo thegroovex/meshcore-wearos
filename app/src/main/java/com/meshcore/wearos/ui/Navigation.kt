@@ -1,8 +1,6 @@
 package com.meshcore.wearos.ui
 
-/**
- * Defines all navigation routes within the MeshCore WearOS app.
- */
+/** Navigation routes. */
 object Screen {
     const val SCAN = "scan"
     const val HOME = "home"
@@ -15,4 +13,12 @@ object Screen {
 
     fun chatRoute(pubKeyHex: String) = "chat/$pubKeyHex"
     fun channelChatRoute(channelIndex: Int) = "channel/$channelIndex"
+
+    /** Maps a conversation key ("c:<hex>" / "ch:<n>") from a notification to a route. */
+    fun routeForConversation(key: String?): String? = when {
+        key == null -> null
+        key.startsWith("ch:") -> key.removePrefix("ch:").toIntOrNull()?.let { channelChatRoute(it) }
+        key.startsWith("c:") -> chatRoute(key.removePrefix("c:"))
+        else -> null
+    }
 }

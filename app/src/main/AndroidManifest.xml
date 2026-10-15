@@ -7,8 +7,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- only needed for BLE scans on Wear OS 3 (API 30) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="30" />
 
     <!-- Foreground Service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -19,14 +20,17 @@
     <!-- Vibration for notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- Wake Lock for background operations -->
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-
     <!-- BLE Feature requirement -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <!-- Wear OS Feature -->
     <uses-feature android:name="android.hardware.type.watch" />
+
+    <queries>
+        <intent>
+            <action android:name="android.support.wearable.input.action.REMOTE_INPUT" />
+        </intent>
+    </queries>
 
     <application
         android:name=".MeshCoreApplication"
@@ -36,6 +40,11 @@
         android:supportsRtl="true"
         android:largeHeap="true"
         android:theme="@android:style/Theme.DeviceDefault">
+
+        <!-- standalone app: works without a paired phone app -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
 
         <!-- Main Activity -->
         <activity
@@ -81,7 +90,7 @@
             </intent-filter>
             <meta-data
                 android:name="android.support.wearable.complications.SUPPORTED_TYPES"
-                android:value="SHORT_TEXT,LONG_TEXT,SMALL_IMAGE" />
+                android:value="SHORT_TEXT,LONG_TEXT" />
             <meta-data
                 android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
                 android:value="300" />

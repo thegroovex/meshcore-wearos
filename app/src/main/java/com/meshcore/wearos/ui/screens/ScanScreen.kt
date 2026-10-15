@@ -1,12 +1,6 @@
 package com.meshcore.wearos.ui.screens
 
-import android.Manifest
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,246 +17,129 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
-import androidx.wear.compose.material.Button
-import androidx.wear.compose.material.ButtonDefaults
+import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.Chip
 import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.CircularProgressIndicator
 import androidx.wear.compose.material.MaterialTheme
+import androidx.wear.compose.material.PositionIndicator
+import androidx.wear.compose.material.Scaffold
 import androidx.wear.compose.material.Text
 import com.meshcore.wearos.ble.BleConnectionState
 import com.meshcore.wearos.ble.BleDevice
 import com.meshcore.wearos.ui.MainViewModel
 import com.meshcore.wearos.ui.theme.MeshGreen
 
-/**
- * ScanScreen displays a list of nearby MeshCore BLE devices and handles runtime permissions.
- */
+/** Lists nearby MeshCore radios. Permissions are requested by the activity, once. */
 @Composable
 fun ScanScreen(
     viewModel: MainViewModel,
+    permissionsGranted: Boolean,
+    onRequestPermissions: () -> Unit,
     onDeviceConnected: () -> Unit
 ) {
     val connectionState by viewModel.connectionState.collectAsState()
-    val scannedDevices by viewModel.scannedDevices.collectAsState()
+    val devices by viewModel.scannedDevices.collectAsState()
+    val listState = rememberScalingLazyListState()
 
-    // Permissions list based on Android version
-    val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        listOf(
-            Manifest.permission.BLUETOOTH_SCAN,
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        )
-    } else {
-        listOf(
-            Manifest.permission.BLUETOOTH,
-            Manifest.permission.BLUETOOTH_ADMIN,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        )
+    LaunchedEffect(permissionsGranted) {
+        if (permissionsGranted && connectionState !is BleConnectionState.Connected &&
+            connectionState !is BleConnectionState.Connecting && connectionState !is BleConnectionState.Pairing
+        ) viewModel.startScan()
     }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        if (results.all { it.value }) {
-            viewModel.startScan()
-        }
-    }
-
-    // Request permissions and start scan when screen is shown
-    LaunchedEffect(Unit) {
-        permissionLauncher.launch(permissions.toTypedArray())
-    }
-
-    // Navigate away when connected
     LaunchedEffect(connectionState) {
-        if (connectionState is BleConnectionState.Connected) {
-            onDeviceConnected()
-        }
+        if (connectionState is BleConnectionState.Connected) onDeviceConnected()
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colors.background)
-    ) {
-        when (connectionState) {
-            is BleConnectionState.Connecting -> {
-                ConnectingContent(
-                    deviceName = (connectionState as BleConnectionState.Connecting).deviceName
-                )
-            }
-            is BleConnectionState.Error -> {
-                ErrorContent(
-                    message = (connectionState as BleConnectionState.Error).message,
-                    onRetry = { permissionLauncher.launch(permissions.toTypedArray()) }
-                )
-            }
-            else -> {
-                DeviceListContent(
-                    isScanning = connectionState is BleConnectionState.Scanning,
-                    devices = scannedDevices,
-                    onDeviceSelected = { device -> viewModel.connect(device.address) },
-                    onScanToggle = {
-                        if (connectionState is BleConnectionState.Scanning) {
-                            viewModel.stopScan()
-                        } else {
-                            permissionLauncher.launch(permissions.toTypedArray())
-                        }
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun DeviceListContent(
-    isScanning: Boolean,
-    devices: List<BleDevice>,
-    onDeviceSelected: (BleDevice) -> Unit,
-    onScanToggle: () -> Unit
-) {
-    ScalingLazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        item {
-            Column(
+    Scaffold(positionIndicator = { PositionIndicator(scalingLazyListState = listState) }) {
+        when (val state = connectionState) {
+            is BleConnectionState.Connecting -> Busy("Connecting to", state.deviceName)
+            is BleConnectionState.Pairing -> Busy("Pairing with ${state.deviceName}", "Enter the radio's BLE PIN (default 123456)")
+            else -> ScalingLazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = listState,
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(top = 24.dp, bottom = 8.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(
-                    text = "MeshCore",
-                    style = MaterialTheme.typography.title2,
-                    color = MeshGreen
-                )
-                Text(
-                    text = if (isScanning) "Scanning..." else "Tap to scan",
-                    style = MaterialTheme.typography.caption2,
-                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f)
-                )
-            }
-        }
-
-        if (isScanning && devices.isEmpty()) {
-            item {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .padding(8.dp),
-                    indicatorColor = MeshGreen
-                )
-            }
-        }
-
-        items(devices) { device ->
-            DeviceChip(
-                device = device,
-                onClick = { onDeviceSelected(device) }
-            )
-        }
-
-        item {
-            Button(
-                onClick = onScanToggle,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                colors = ButtonDefaults.buttonColors(
-                    backgroundColor = if (isScanning) MaterialTheme.colors.error else MeshGreen
-                )
-            ) {
-                Text(
-                    text = if (isScanning) "Stop" else "Scan",
-                    color = Color.Black
-                )
+                item { ScreenTitle("MeshCore") }
+                item {
+                    Text(
+                        text = when {
+                            !permissionsGranted -> "Bluetooth permission needed"
+                            state is BleConnectionState.Error -> state.message
+                            state is BleConnectionState.Scanning -> "Searching radios…"
+                            devices.isEmpty() -> "No radio found"
+                            else -> "Choose your radio"
+                        },
+                        style = MaterialTheme.typography.caption2,
+                        color = if (state is BleConnectionState.Error) MaterialTheme.colors.error
+                                else MaterialTheme.colors.onSurface.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+                if (state is BleConnectionState.Scanning && devices.isEmpty()) {
+                    item { CircularProgressIndicator(modifier = Modifier.size(28.dp), indicatorColor = MeshGreen) }
+                }
+                items(devices, key = { it.address }) { device ->
+                    DeviceChip(device) { viewModel.connect(device.address) }
+                }
+                item {
+                    val scanning = state is BleConnectionState.Scanning
+                    Chip(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                        onClick = {
+                            when {
+                                !permissionsGranted -> onRequestPermissions()
+                                scanning -> viewModel.stopScan()
+                                else -> viewModel.startScan()
+                            }
+                        },
+                        label = {
+                            Text(
+                                when {
+                                    !permissionsGranted -> "Grant permission"
+                                    scanning -> "Stop"
+                                    else -> "Scan again"
+                                },
+                                color = Color.Black
+                            )
+                        },
+                        colors = ChipDefaults.primaryChipColors(backgroundColor = MeshGreen)
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun DeviceChip(
-    device: BleDevice,
-    onClick: () -> Unit
-) {
+private fun DeviceChip(device: BleDevice, onClick: () -> Unit) {
     Chip(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
         onClick = onClick,
-        label = {
-            Text(
-                text = device.name,
-                style = MaterialTheme.typography.body2,
-                maxLines = 1
-            )
-        },
+        label = { Text(device.name, maxLines = 1) },
         secondaryLabel = {
             Text(
-                text = "${device.address} · ${device.rssi} dBm",
+                "${device.rssi} dBm · ${device.address.takeLast(5)}",
                 style = MaterialTheme.typography.caption2,
-                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                 maxLines = 1
             )
         },
-        colors = ChipDefaults.chipColors(
-            backgroundColor = MaterialTheme.colors.surface
-        )
+        colors = ChipDefaults.secondaryChipColors()
     )
 }
 
 @Composable
-private fun ConnectingContent(deviceName: String) {
+private fun Busy(title: String, subtitle: String) {
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(48.dp),
-            indicatorColor = MeshGreen
-        )
-        Text(
-            text = "Connecting to",
-            style = MaterialTheme.typography.caption2,
-            modifier = Modifier.padding(top = 12.dp)
-        )
-        Text(
-            text = deviceName,
-            style = MaterialTheme.typography.body2,
-            color = MeshGreen,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-    }
-}
-
-@Composable
-private fun ErrorContent(message: String, onRetry: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = "Connection Error",
-            style = MaterialTheme.typography.title3,
-            color = MaterialTheme.colors.error
-        )
-        Text(
-            text = message,
-            style = MaterialTheme.typography.caption2,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(8.dp)
-        )
-        Button(
-            onClick = onRetry,
-            colors = ButtonDefaults.buttonColors(backgroundColor = MeshGreen)
-        ) {
-            Text("Retry", color = Color.Black)
-        }
+        CircularProgressIndicator(modifier = Modifier.size(40.dp), indicatorColor = MeshGreen)
+        Text(title, style = MaterialTheme.typography.caption1, textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 12.dp))
+        Text(subtitle, style = MaterialTheme.typography.caption2, color = MeshGreen, textAlign = TextAlign.Center)
     }
 }

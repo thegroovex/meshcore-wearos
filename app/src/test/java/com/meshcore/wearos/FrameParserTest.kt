@@ -3,158 +3,252 @@ package com.meshcore.wearos
 import com.meshcore.wearos.ble.FrameParser
 import com.meshcore.wearos.ble.MeshCoreProtocol
 import com.meshcore.wearos.ble.ParsedFrame
+import com.meshcore.wearos.ble.toHex
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
- * Unit tests for the MeshCore BLE frame parser.
- *
- * These tests verify that raw BLE frames are correctly decoded into
- * typed ParsedFrame objects according to the Companion Radio Protocol spec.
+ * Frames are built exactly the way the reference firmware writes them
+ * (examples/companion_radio/MyMesh.cpp) so these tests pin the wire format.
  */
 class FrameParserTest {
 
-    @Test
-    fun `parse RESP_CODE_OK returns ParsedFrame_Ok`() {
-        val frame = byteArrayOf(MeshCoreProtocol.RESP_CODE_OK)
-        val result = FrameParser.parse(frame)
-        assertTrue("Expected ParsedFrame.Ok", result is ParsedFrame.Ok)
+    private fun frame(size: Int = 256, block: ByteBuffer.() -> Unit): ByteArray {
+        val b = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
+        b.block()
+        return b.array().copyOf(b.position())
+    }
+
+    private fun ByteBuffer.fixedString(s: String, size: Int) {
+        val bytes = s.toByteArray(Charsets.UTF_8)
+        put(bytes.copyOf(size))
+    }
+
+    /** Public key deliberately full of 0x00/0x03/0x04 bytes that broke the old boundary guessing. */
+    private val pubKey = ByteArray(32) { i -> listOf(0x00, 0x03, 0x04, 0x02, 0xAB)[i % 5].toByte() }
+
+    private fun contactFrame(code: Byte, name: String, pathLen: Int = 2, lastMod: Int = 1_700_000_100) = frame {
+        put(code)
+        put(pubKey)
+        put(MeshCoreProtocol.ADV_TYPE_CHAT.toByte())
+        put(0) // flags
+        put(pathLen.toByte())
+        put(ByteArray(64))
+        fixedString(name, 32)
+        putInt(1_700_000_000)    // last advert
+        putInt(51_034_567)       // lat * 1e6
+        putInt(7_012_345)        // lon * 1e6
+        putInt(lastMod)
     }
 
     @Test
-    fun `parse RESP_CODE_ERR returns ParsedFrame_Err with error code`() {
-        val frame = byteArrayOf(MeshCoreProtocol.RESP_CODE_ERR, 2) // ERR_CODE_NOT_FOUND
-        val result = FrameParser.parse(frame)
-        assertTrue(result is ParsedFrame.Err)
-        assertEquals(2, (result as ParsedFrame.Err).errorCode)
+    fun `ok and err`() {
+        assertEquals(ParsedFrame.Ok, FrameParser.parse(byteArrayOf(0)))
+        val err = FrameParser.parse(byteArrayOf(1, 2))
+        assertEquals(ParsedFrame.Err(MeshCoreProtocol.ERR_CODE_NOT_FOUND), err)
+        assertEquals(ParsedFrame.Err(0), FrameParser.parse(byteArrayOf(1)))
     }
 
     @Test
-    fun `parse RESP_CODE_CONTACTS_START returns ParsedFrame_ContactsStart`() {
-        val frame = byteArrayOf(MeshCoreProtocol.RESP_CODE_CONTACTS_START)
-        val result = FrameParser.parse(frame)
-        assertTrue(result is ParsedFrame.ContactsStart)
+    fun `contact frame has full 148 byte layout`() {
+        val raw = contactFrame(MeshCoreProtocol.RESP_CODE_CONTACT, "Bärbel")
+        assertEquals(148, raw.size)
+        val parsed = FrameParser.parse(raw) as ParsedFrame.ContactFrame
+        val c = parsed.contact
+        assertArrayEquals(pubKey, c.publicKey)
+        assertEquals("Bärbel", c.name)
+        assertEquals(1, c.type)
+        assertEquals(2, c.outPathLen)
+        assertEquals(1_700_000_000L, c.lastAdvertTimestamp)
+        assertEquals(51.034567, c.latitude, 1e-9)
+        assertEquals(7.012345, c.longitude, 1e-9)
+        assertEquals(1_700_000_100L, c.lastModified)
+        assertFalse("contact stream must not complete a pending command", parsed.isCommandResponse)
     }
 
     @Test
-    fun `parse RESP_CODE_END_OF_CONTACTS returns ParsedFrame_EndOfContacts`() {
-        val frame = byteArrayOf(MeshCoreProtocol.RESP_CODE_END_OF_CONTACTS)
-        val result = FrameParser.parse(frame)
-        assertTrue(result is ParsedFrame.EndOfContacts)
+    fun `contact with unknown path reports -1`() {
+        val c = (FrameParser.parse(contactFrame(MeshCoreProtocol.RESP_CODE_CONTACT, "X", pathLen = -1)) as ParsedFrame.ContactFrame).contact
+        assertEquals(-1, c.outPathLen)
     }
 
     @Test
-    fun `parse PUSH_CODE_MSG_WAITING returns ParsedFrame_MessageWaiting`() {
-        val frame = byteArrayOf(MeshCoreProtocol.PUSH_CODE_MSG_WAITING)
-        val result = FrameParser.parse(frame)
-        assertTrue(result is ParsedFrame.MessageWaiting)
+    fun `new advert push carries a contact`() {
+        val p = FrameParser.parse(contactFrame(MeshCoreProtocol.PUSH_CODE_NEW_ADVERT, "Repeater 1"))
+        assertTrue(p is ParsedFrame.NewAdvertPush)
+        assertEquals("Repeater 1", (p as ParsedFrame.NewAdvertPush).contact.name)
+        assertFalse(p.isCommandResponse)
     }
 
     @Test
-    fun `parse RESP_CODE_NO_MORE_MESSAGES returns ParsedFrame_NoMoreMessages`() {
-        val frame = byteArrayOf(MeshCoreProtocol.RESP_CODE_NO_MORE_MESSAGES)
-        val result = FrameParser.parse(frame)
-        assertTrue(result is ParsedFrame.NoMoreMessages)
+    fun `contacts start and end`() {
+        val start = FrameParser.parse(frame { put(2); putInt(42) })
+        assertEquals(ParsedFrame.ContactsStart(42), start)
+        assertTrue(start.isCommandResponse)
+        val end = FrameParser.parse(frame { put(4); putInt(-1) })
+        assertEquals(ParsedFrame.EndOfContacts(0xFFFFFFFFL), end)
+        assertFalse(end.isCommandResponse)
     }
 
     @Test
-    fun `parse RESP_CODE_SENT returns ParsedFrame_Sent with ack code`() {
-        // Build a SENT frame with ACK code 0x12345678 (little-endian)
-        val frame = byteArrayOf(
-            MeshCoreProtocol.RESP_CODE_SENT,
-            0x78.toByte(), 0x56.toByte(), 0x34.toByte(), 0x12.toByte()
-        )
-        val result = FrameParser.parse(frame)
-        assertTrue(result is ParsedFrame.Sent)
-        assertEquals(0x12345678L, (result as ParsedFrame.Sent).expectedAckCode)
+    fun `self info`() {
+        val raw = frame {
+            put(MeshCoreProtocol.RESP_CODE_SELF_INFO)
+            put(1); put(22); put(30)
+            put(pubKey)
+            putInt(51_000_000); putInt(-7_500_000)
+            put(0); put(0); put(0); put(0)
+            putInt(869_525)      // kHz
+            putInt(250_000)      // Hz
+            put(11); put(5)
+            put("Watch Node".toByteArray())
+        }
+        val s = (FrameParser.parse(raw) as ParsedFrame.SelfInfo).info
+        assertEquals("Watch Node", s.name)
+        assertEquals(22, s.txPowerDbm)
+        assertEquals(869_525L, s.radioFreqKhz)
+        assertEquals(250_000L, s.radioBandwidthHz)
+        assertEquals(11, s.spreadingFactor)
+        assertEquals(-7.5, s.longitude, 1e-9)
+        assertArrayEquals(pubKey, s.publicKey)
     }
 
     @Test
-    fun `parse RESP_CODE_CURR_TIME returns ParsedFrame_CurrentTime`() {
-        // Epoch 1700000000 = 0x6553F100 (little-endian: 00 F1 53 65)
-        val frame = byteArrayOf(
-            MeshCoreProtocol.RESP_CODE_CURR_TIME,
-            0x00.toByte(), 0xF1.toByte(), 0x53.toByte(), 0x65.toByte()
-        )
-        val result = FrameParser.parse(frame)
-        assertTrue(result is ParsedFrame.CurrentTime)
-        assertEquals(1700000000L, (result as ParsedFrame.CurrentTime).epochSecs)
+    fun `device info v3 plus`() {
+        val raw = frame {
+            put(MeshCoreProtocol.RESP_CODE_DEVICE_INFO)
+            put(8); put(50); put(8)
+            putInt(123456)
+            fixedString("19 Sep 2025", 12)
+            fixedString("Heltec V3", 40)
+            fixedString("v1.9.0", 20)
+            put(0); put(0)
+        }
+        val d = (FrameParser.parse(raw) as ParsedFrame.DeviceInfo).info
+        assertEquals(8, d.firmwareVersionCode)
+        assertEquals(100, d.maxContacts)
+        assertEquals(8, d.maxChannels)
+        assertEquals("Heltec V3", d.manufacturer)
+        assertEquals("v1.9.0", d.firmwareVersion)
+        assertEquals("19 Sep 2025", d.buildDate)
     }
 
     @Test
-    fun `parse PUSH_CODE_SEND_CONFIRMED returns ParsedFrame_SendConfirmed`() {
-        // reserved(1) + ackCode(4) + roundTripMs(4)
-        val frame = byteArrayOf(
-            MeshCoreProtocol.PUSH_CODE_SEND_CONFIRMED,
-            0x00.toByte(), // reserved
-            0x78.toByte(), 0x56.toByte(), 0x34.toByte(), 0x12.toByte(), // ack code
-            0xE8.toByte(), 0x03.toByte(), 0x00.toByte(), 0x00.toByte()  // 1000ms RTT
-        )
-        val result = FrameParser.parse(frame)
-        assertTrue(result is ParsedFrame.SendConfirmed)
-        val confirmed = result as ParsedFrame.SendConfirmed
-        assertEquals(0x12345678L, confirmed.ackCode)
-        assertEquals(1000L, confirmed.roundTripMs)
+    fun `sent response`() {
+        val raw = frame { put(6); put(1); putInt(0xDEADBEEF.toInt()); putInt(12_000) }
+        val s = FrameParser.parse(raw) as ParsedFrame.Sent
+        assertTrue(s.isFlood)
+        assertEquals(0xDEADBEEFL, s.expectedAckCode)
+        assertEquals(12_000L, s.estimatedTimeoutMs)
     }
 
     @Test
-    fun `parse RESP_CODE_BATT_AND_STORAGE returns correct values`() {
-        // battMillivolts=3700 (0x0E74), usedStorage=100 (0x0064), totalStorage=512 (0x0200)
-        val frame = byteArrayOf(
-            MeshCoreProtocol.RESP_CODE_BATT_AND_STORAGE,
-            0x74.toByte(), 0x0E.toByte(), // 3700 mV
-            0x64.toByte(), 0x00.toByte(), // 100 KB used
-            0x00.toByte(), 0x02.toByte()  // 512 KB total
-        )
-        val result = FrameParser.parse(frame)
-        assertTrue(result is ParsedFrame.BatteryAndStorage)
-        val batt = result as ParsedFrame.BatteryAndStorage
-        assertEquals(3700, batt.batteryMillivolts)
-        assertEquals(100, batt.usedStorage)
-        assertEquals(512, batt.totalStorage)
+    fun `contact message v3`() {
+        val raw = frame {
+            put(MeshCoreProtocol.RESP_CODE_CONTACT_MSG_RECV_V3)
+            put((-26).toByte()) // SNR * 4 = -6.5 dB
+            put(0); put(0)
+            put(pubKey, 0, 6)
+            put(3) // path len
+            put(MeshCoreProtocol.TXT_TYPE_PLAIN.toByte())
+            putInt(1_700_000_500)
+            put("Hallo Uhr 👋".toByteArray())
+        }
+        val m = (FrameParser.parse(raw) as ParsedFrame.ContactMessage).msg
+        assertEquals(pubKey.copyOf(6).toHex(), m.senderPrefixHex)
+        assertEquals(-6.5f, m.snr!!, 0.001f)
+        assertEquals(3, m.pathLen)
+        assertEquals(1_700_000_500L, m.senderTimestamp)
+        assertEquals("Hallo Uhr 👋", m.text)
     }
 
     @Test
-    fun `parse RESP_CODE_DEVICE_INFO returns ParsedFrame_DeviceInfoFrame`() {
-        // Build a dummy device info frame (32 bytes pubkey + type + name)
-        val frame = ByteArray(35)
-        frame[0] = MeshCoreProtocol.RESP_CODE_DEVICE_INFO
-        val result = FrameParser.parse(frame)
-        assertTrue(result is ParsedFrame.DeviceInfoFrame)
+    fun `contact message legacy and signed`() {
+        val raw = frame {
+            put(MeshCoreProtocol.RESP_CODE_CONTACT_MSG_RECV)
+            put(pubKey, 0, 6)
+            put(0xFF.toByte()) // direct
+            put(MeshCoreProtocol.TXT_TYPE_SIGNED_PLAIN.toByte())
+            putInt(5)
+            put(byteArrayOf(9, 9, 9, 9)) // signer prefix
+            put("signed".toByteArray())
+        }
+        val m = (FrameParser.parse(raw) as ParsedFrame.ContactMessage).msg
+        assertNull(m.snr)
+        assertEquals(-1, m.pathLen)
+        assertEquals("signed", m.text)
     }
 
     @Test
-    fun `parse empty frame returns ParsedFrame_Unknown`() {
-        val frame = ByteArray(0)
-        val result = FrameParser.parse(frame)
-        assertTrue(result is ParsedFrame.Unknown)
+    fun `channel message splits sender name`() {
+        val raw = frame {
+            put(MeshCoreProtocol.RESP_CODE_CHANNEL_MSG_RECV_V3)
+            put(20); put(0); put(0)
+            put(0) // channel 0
+            put(1)
+            put(0)
+            putInt(1_700_000_600)
+            put("Alice: hi: all".toByteArray())
+        }
+        val m = (FrameParser.parse(raw) as ParsedFrame.ChannelMessage).msg
+        assertEquals(0, m.channelIndex)
+        assertEquals("Alice", m.senderName)
+        assertEquals("hi: all", m.text)
+        assertEquals(5f, m.snr!!, 0.001f)
     }
 
     @Test
-    fun `buildSimpleCommand creates single-byte frame`() {
-        val frame = MeshCoreProtocol.buildSimpleCommand(MeshCoreProtocol.CMD_GET_BATT_AND_STORAGE)
-        assertEquals(1, frame.size)
-        assertEquals(MeshCoreProtocol.CMD_GET_BATT_AND_STORAGE, frame[0])
+    fun `battery and storage`() {
+        val b = FrameParser.parse(frame { put(12); putShort(4012); putInt(100); putInt(2000) }) as ParsedFrame.BatteryAndStorage
+        assertEquals(4012, b.batteryMillivolts)
+        assertEquals(100L, b.usedKb)
+        assertEquals(2000L, b.totalKb)
+        // older firmware only sends the voltage
+        val old = FrameParser.parse(frame { put(12); putShort(3700) }) as ParsedFrame.BatteryAndStorage
+        assertEquals(3700, old.batteryMillivolts)
     }
 
     @Test
-    fun `buildAppStartFrame includes client version`() {
-        val frame = MeshCoreProtocol.buildAppStartFrame()
-        assertEquals(3, frame.size)
-        assertEquals(MeshCoreProtocol.CMD_APP_START, frame[0])
-        assertEquals(MeshCoreProtocol.CLIENT_VERSION.toByte(), frame[1])
+    fun `current time`() {
+        assertEquals(ParsedFrame.CurrentTime(1_700_000_000L), FrameParser.parse(frame { put(9); putInt(1_700_000_000) }))
     }
 
     @Test
-    fun `buildSendTextMsgFrame has correct structure`() {
-        val pubKey = ByteArray(32) { it.toByte() }
-        val message = "Hello, MeshCore!"
-        val frame = MeshCoreProtocol.buildSendTextMsgFrame(pubKey, message)
+    fun `channel info`() {
+        val raw = frame { put(18); put(1); fixedString("Wandergruppe", 32); put(ByteArray(16) { 7 }) }
+        val c = FrameParser.parse(raw) as ParsedFrame.ChannelInfo
+        assertEquals(1, c.index)
+        assertEquals("Wandergruppe", c.name)
+        assertFalse(c.isEmpty)
+        val empty = FrameParser.parse(frame { put(18); put(5); put(ByteArray(48)) }) as ParsedFrame.ChannelInfo
+        assertTrue(empty.isEmpty)
+    }
 
-        assertEquals(1 + 32 + 1 + message.toByteArray().size, frame.size)
-        assertEquals(MeshCoreProtocol.CMD_SEND_TXT_MSG, frame[0])
-        assertEquals(message, frame.copyOfRange(34, frame.size).toString(Charsets.UTF_8))
+    @Test
+    fun `pushes are not command responses`() {
+        val confirmed = FrameParser.parse(frame { put(0x82.toByte()); putInt(77); putInt(1500) })
+        assertEquals(ParsedFrame.SendConfirmed(77, 1500), confirmed)
+        assertFalse(confirmed.isCommandResponse)
+        assertEquals(ParsedFrame.MessageWaiting, FrameParser.parse(byteArrayOf(0x83.toByte())))
+        val advert = FrameParser.parse(frame { put(0x80.toByte()); put(pubKey) }) as ParsedFrame.AdvertPush
+        assertArrayEquals(pubKey, advert.publicKey)
+        assertTrue(FrameParser.parse(byteArrayOf(0x88.toByte(), 1, 2)) is ParsedFrame.OtherPush)
+    }
+
+    @Test
+    fun `truncated frames do not throw and still answer the pending command`() {
+        val p = FrameParser.parse(byteArrayOf(MeshCoreProtocol.RESP_CODE_SELF_INFO, 1, 2))
+        assertTrue(p is ParsedFrame.Malformed)
+        assertTrue(p.isCommandResponse)
+        val c = FrameParser.parse(byteArrayOf(MeshCoreProtocol.RESP_CODE_CONTACT, 1, 2))
+        assertTrue(c is ParsedFrame.Malformed)
+        assertFalse(c.isCommandResponse)
+        assertTrue(FrameParser.parse(ByteArray(0)) is ParsedFrame.Unknown)
     }
 }

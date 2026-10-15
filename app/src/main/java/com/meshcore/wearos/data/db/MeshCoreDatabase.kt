@@ -34,12 +34,6 @@ class MeshCoreTypeConverters {
     @TypeConverter
     fun toMessageStatus(value: String): MessageStatus = MessageStatus.valueOf(value)
 
-    @TypeConverter
-    fun fromByteArray(value: ByteArray): String = value.joinToString("") { "%02x".format(it) }
-
-    @TypeConverter
-    fun toByteArray(value: String): ByteArray =
-        value.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 }
 
 /**
@@ -48,7 +42,7 @@ class MeshCoreTypeConverters {
  */
 @Database(
     entities = [Contact::class, Message::class, Channel::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(MeshCoreTypeConverters::class)
