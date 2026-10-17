@@ -15,6 +15,10 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+  issues: write   # failing jobs post their error tail as an issue (readable without log access)
+
 concurrency:
   group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
@@ -55,7 +59,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/master' }}
-      - run: ./gradlew testDebugUnitTest $GRADLE_ARGS
+      - run: ./gradlew testDebugUnitTest $GRADLE_ARGS 2>&1 | tee gradle.log; exit ${PIPESTATUS[0]}
+        shell: bash
+      - name: Report failure
+        if: failure()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          { echo '```'; grep -E '^e: |error:|FAILURE|What went wrong|Lint found|Exception|FAILED' -A3 gradle.log | head -60; echo '---'; tail -25 gradle.log; echo '```'; } > body.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "CI failure: unit-tests (run ${{ github.run_id }})" --body-file body.md || true
       - name: Test report
         if: failure()
         uses: actions/upload-artifact@v4
@@ -76,7 +87,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/master' }}
-      - run: ./gradlew lintDebug $GRADLE_ARGS
+      - run: ./gradlew lintDebug $GRADLE_ARGS 2>&1 | tee gradle.log; exit ${PIPESTATUS[0]}
+        shell: bash
+      - name: Report failure
+        if: failure()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          { echo '```'; grep -E '^e: |error:|FAILURE|What went wrong|Lint found|Exception|FAILED' -A3 gradle.log | head -60; echo '---'; tail -25 gradle.log; echo '```'; } > body.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "CI failure: lint (run ${{ github.run_id }})" --body-file body.md || true
       - name: Lint report
         if: always()
         uses: actions/upload-artifact@v4
@@ -98,7 +116,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/master' }}
-      - run: ./gradlew assembleDebug $GRADLE_ARGS
+      - run: ./gradlew assembleDebug $GRADLE_ARGS 2>&1 | tee gradle.log; exit ${PIPESTATUS[0]}
+        shell: bash
+      - name: Report failure
+        if: failure()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          { echo '```'; grep -E '^e: |error:|FAILURE|What went wrong|Lint found|Exception|FAILED' -A3 gradle.log | head -60; echo '---'; tail -25 gradle.log; echo '```'; } > body.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "CI failure: debug-apk (run ${{ github.run_id }})" --body-file body.md || true
       - uses: actions/upload-artifact@v4
         with:
           name: meshcore-wearos-debug
@@ -121,7 +146,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: true
-      - run: ./gradlew assembleRelease $GRADLE_ARGS
+      - run: ./gradlew assembleRelease $GRADLE_ARGS 2>&1 | tee gradle.log; exit ${PIPESTATUS[0]}
+        shell: bash
+      - name: Report failure
+        if: failure()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          { echo '```'; grep -E '^e: |error:|FAILURE|What went wrong|Lint found|Exception|FAILED' -A3 gradle.log | head -60; echo '---'; tail -25 gradle.log; echo '```'; } > body.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "CI failure: release-apk (run ${{ github.run_id }})" --body-file body.md || true
       - uses: actions/upload-artifact@v4
         with:
           name: meshcore-wearos-release-unsigned
