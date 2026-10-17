@@ -1,23 +1,151 @@
-name: Build
+name: CI
+
+# CI is the compiler for this project (no local builds in the sandbox).
+# changes -> (unit-tests | lint | debug-apk) in parallel -> "CI result" gate (single required check).
+# Docs-only changes skip all Gradle jobs. Release APK only on label `release`, tags or manual run.
 
 on:
   push:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
+    inputs:
+      release:
+        description: Also build the release APK
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
+  GRADLE_ARGS: --console=plain --build-cache --configuration-cache
 
 jobs:
-  build:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'app/**'
+              - 'gradle/**'
+              - '*.gradle.kts'
+              - 'gradle.properties'
+              - 'gradlew*'
+              - '.github/workflows/**'
+
+  unit-tests:
+    name: Unit tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
+        with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
-      - name: Unit tests and debug APK
-        run: ./gradlew testDebugUnitTest assembleDebug --console=plain
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/master' }}
+      - run: ./gradlew testDebugUnitTest $GRADLE_ARGS
+      - name: Test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests
+          retention-days: 3
+
+  lint:
+    name: Android lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/master' }}
+      - run: ./gradlew lintDebug $GRADLE_ARGS
+      - name: Lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.*
+          retention-days: 3
+          if-no-files-found: ignore
+
+  debug-apk:
+    name: Debug APK
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/master' }}
+      - run: ./gradlew assembleDebug $GRADLE_ARGS
       - uses: actions/upload-artifact@v4
         with:
           name: meshcore-wearos-debug
           path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+
+  release-apk:
+    name: Release APK (label `release`)
+    needs: changes
+    if: >-
+      needs.changes.outputs.code == 'true' && (
+        startsWith(github.ref, 'refs/tags/') ||
+        (github.event_name == 'workflow_dispatch' && inputs.release) ||
+        (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'release')))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+      - run: ./gradlew assembleRelease $GRADLE_ARGS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meshcore-wearos-release-unsigned
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 14
+
+  docs-only:
+    name: Docs only (builds skipped)
+    needs: changes
+    if: needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Only documentation changed - Gradle jobs skipped."
+
+  result:
+    name: CI result
+    if: always()
+    needs: [changes, unit-tests, lint, debug-apk, release-apk, docs-only]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check job results
+        run: |
+          echo '${{ toJSON(needs) }}' | python3 -c "
+          import json,sys
+          bad={k:v['result'] for k,v in json.load(sys.stdin).items() if v['result'] not in ('success','skipped')}
+          print('failed:',bad) if bad else print('all good')
+          sys.exit(1 if bad else 0)"
