@@ -547,7 +547,7 @@ class BleManager @Inject constructor(
                     pendingWrite = done
                     val started = try {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            gatt.writeCharacteristic(rx, frame, writeType) == BluetoothGatt.GATT_SUCCESS
+                            gatt.writeCharacteristic(rx, frame, writeType) == android.bluetooth.BluetoothStatusCodes.SUCCESS
                         } else {
                             @Suppress("DEPRECATION")
                             rx.writeType = writeType
